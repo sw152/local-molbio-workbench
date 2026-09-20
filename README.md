@@ -40,3 +40,5 @@ Do not expose the database or internal worker ports to the LAN or public interne
 Real Benchling exports are private research data. Keep them outside the repository. The test suite uses synthetic records only.
 
 The product boundary, workstation deployment model, data model, and staged acceptance criteria are documented in [the Chinese architecture and roadmap](docs/architecture-and-roadmap.zh-CN.md).
+
+The continuously executed delivery plan is in [the Chinese execution plan](docs/execution-plan.zh-CN.md).

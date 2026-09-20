@@ -48,6 +48,7 @@ def test_import_preserves_duplicate_archive_member_names(tmp_path: Path, monkeyp
             FROM sequences ORDER BY archive_member_index
             """
         ).fetchall()
+        revision_count = connection.execute("SELECT COUNT(*) AS count FROM sequence_revisions").fetchone()["count"]
     assert [(row["display_name"], row["archive_member_occurrence"]) for row in rows] == [
         ("first", 1),
         ("second", 2),
@@ -55,6 +56,7 @@ def test_import_preserves_duplicate_archive_member_names(tmp_path: Path, monkeyp
     assert json.loads(rows[0]["features_json"])[0]["segments"] == [
         {"start": 0, "end": 8, "strand": 1}
     ]
+    assert revision_count == 2
 
 
 def test_same_archive_cannot_be_imported_twice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

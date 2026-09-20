@@ -37,6 +37,11 @@ ORIGIN
         assert sequences.status_code == 200
         assert sequences.json()[0]["parse_warning_count"] == 1
 
+        revisions = client.get(f"/api/sequences/{sequences.json()[0]['id']}/revisions")
+        assert revisions.status_code == 200
+        assert revisions.json()[0]["revision_number"] == 1
+        assert revisions.json()[0]["source_kind"] == "import"
+
         detail = client.get(f"/api/sequences/{sequences.json()[0]['id']}")
         assert detail.status_code == 200
         assert "spans the origin" in detail.json()["parse_warnings_json"]

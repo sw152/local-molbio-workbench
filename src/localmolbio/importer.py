@@ -113,10 +113,55 @@ def _parse_genbank(raw: bytes | str, member_name: str) -> dict[str, object]:
         "molecule_type": record.annotations.get("molecule_type"),
         "feature_count": len(record.features),
         "features": _serialise_features(record),
+        "sequence": sequence,
         "parse_warnings": [str(item.message) for item in captured_warnings],
         "sequence_sha256": sha256(sequence.encode("ascii")).hexdigest(),
         "raw_genbank": text,
     }
+
+
+def ensure_initial_revisions(database: Path | None = None) -> int:
+    """Backfill one immutable import revision for records created by earlier releases."""
+    initialise(database)
+    inserted = 0
+    with connect(database) as connection:
+        rows = connection.execute(
+            """
+            SELECT sequences.id, sequences.display_name, sequences.sequence_sha256,
+                   sequences.topology, sequences.features_json, sequences.raw_genbank,
+                   sequences.archive_member_name, sequences.created_at
+            FROM sequences
+            LEFT JOIN sequence_revisions
+              ON sequence_revisions.sequence_id = sequences.id
+            WHERE sequence_revisions.id IS NULL
+            """
+        ).fetchall()
+        for row in rows:
+            parsed = _parse_genbank(row["raw_genbank"], row["archive_member_name"])
+            features_json = row["features_json"]
+            if features_json == "[]":
+                features_json = json.dumps(parsed["features"])
+            connection.execute(
+                """
+                INSERT INTO sequence_revisions (
+                    id, sequence_id, parent_revision_id, revision_number, label,
+                    sequence_text, sequence_sha256, topology, features_json,
+                    source_kind, created_at
+                ) VALUES (?, ?, NULL, 1, ?, ?, ?, ?, ?, 'import', ?)
+                """,
+                (
+                    str(uuid4()),
+                    row["id"],
+                    row["display_name"],
+                    parsed["sequence"],
+                    row["sequence_sha256"],
+                    row["topology"],
+                    features_json,
+                    row["created_at"],
+                ),
+            )
+            inserted += 1
+    return inserted
 
 
 def import_benchling_archive(archive: Path, database: Path | None = None) -> ImportSummary:
@@ -138,6 +183,7 @@ def import_benchling_archive(archive: Path, database: Path | None = None) -> Imp
 
             archive_hash = _file_sha256(archive)
             initialise(database)
+            ensure_initial_revisions(database)
             with connect(database) as connection:
                 prior = connection.execute(
                     "SELECT id FROM imports WHERE archive_sha256 = ?", (archive_hash,)
@@ -201,6 +247,7 @@ def import_benchling_archive(archive: Path, database: Path | None = None) -> Imp
         seen: Counter[str] = Counter()
         for member, index, raw, parsed in rows:
             seen[member.filename] += 1
+            sequence_id = str(uuid4())
             connection.execute(
                 """
                 INSERT INTO sequences (
@@ -212,7 +259,7 @@ def import_benchling_archive(archive: Path, database: Path | None = None) -> Imp
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    str(uuid4()),
+                    sequence_id,
                     import_id,
                     index,
                     member.filename,
@@ -228,6 +275,25 @@ def import_benchling_archive(archive: Path, database: Path | None = None) -> Imp
                     len(parsed["parse_warnings"]),
                     json.dumps(parsed["parse_warnings"]),
                     parsed["raw_genbank"],
+                    imported_at,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO sequence_revisions (
+                    id, sequence_id, parent_revision_id, revision_number, label,
+                    sequence_text, sequence_sha256, topology, features_json,
+                    source_kind, created_at
+                ) VALUES (?, ?, NULL, 1, ?, ?, ?, ?, ?, 'import', ?)
+                """,
+                (
+                    str(uuid4()),
+                    sequence_id,
+                    parsed["display_name"],
+                    parsed["sequence"],
+                    parsed["sequence_sha256"],
+                    parsed["topology"],
+                    json.dumps(parsed["features"]),
                     imported_at,
                 ),
             )

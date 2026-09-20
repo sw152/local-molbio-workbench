@@ -45,6 +45,67 @@ CREATE TABLE IF NOT EXISTS sequences (
 
 CREATE INDEX IF NOT EXISTS sequences_display_name_idx ON sequences(display_name);
 CREATE INDEX IF NOT EXISTS sequences_sequence_sha_idx ON sequences(sequence_sha256);
+
+CREATE TABLE IF NOT EXISTS sequence_revisions (
+    id TEXT PRIMARY KEY,
+    sequence_id TEXT NOT NULL REFERENCES sequences(id) ON DELETE RESTRICT,
+    parent_revision_id TEXT REFERENCES sequence_revisions(id) ON DELETE RESTRICT,
+    revision_number INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    sequence_text TEXT NOT NULL,
+    sequence_sha256 TEXT NOT NULL,
+    topology TEXT NOT NULL CHECK(topology IN ('circular', 'linear', 'unknown')),
+    features_json TEXT NOT NULL DEFAULT '[]',
+    source_kind TEXT NOT NULL CHECK(source_kind IN ('import', 'manual-edit')),
+    created_at TEXT NOT NULL,
+    UNIQUE(sequence_id, revision_number)
+);
+
+CREATE INDEX IF NOT EXISTS sequence_revisions_sequence_idx ON sequence_revisions(sequence_id, revision_number DESC);
+
+CREATE TABLE IF NOT EXISTS primers (
+    id TEXT PRIMARY KEY,
+    sequence_revision_id TEXT NOT NULL REFERENCES sequence_revisions(id) ON DELETE RESTRICT,
+    name TEXT,
+    sequence_text TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK(direction IN ('forward', 'reverse')),
+    purpose TEXT NOT NULL,
+    binding_start INTEGER,
+    binding_end INTEGER,
+    metrics_json TEXT NOT NULL DEFAULT '{}',
+    design_parameters_json TEXT NOT NULL DEFAULT '{}',
+    selection_state TEXT NOT NULL CHECK(selection_state IN ('candidate', 'selected', 'archived')),
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS primers_revision_idx ON primers(sequence_revision_id, selection_state);
+
+CREATE TABLE IF NOT EXISTS analysis_jobs (
+    id TEXT PRIMARY KEY,
+    sequence_revision_id TEXT REFERENCES sequence_revisions(id) ON DELETE RESTRICT,
+    job_kind TEXT NOT NULL CHECK(job_kind IN ('primer-design', 'sanger-verification', 'plasmid-verification')),
+    status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+    parameters_json TEXT NOT NULL DEFAULT '{}',
+    input_manifest_json TEXT NOT NULL DEFAULT '{}',
+    result_summary_json TEXT NOT NULL DEFAULT '{}',
+    error_detail TEXT,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS analysis_jobs_status_idx ON analysis_jobs(status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS audit_events (
+    id TEXT PRIMARY KEY,
+    object_type TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS audit_events_object_idx ON audit_events(object_type, object_id, created_at DESC);
 """
 
 

@@ -10,12 +10,18 @@ from fastapi.responses import FileResponse
 
 from .config import database_path
 from .database import connect, initialise
-from .importer import ImportErrorDetail, _parse_genbank, import_benchling_archive
+from .importer import (
+    ImportErrorDetail,
+    _parse_genbank,
+    ensure_initial_revisions,
+    import_benchling_archive,
+)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     initialise()
+    ensure_initial_revisions()
     yield
 
 
@@ -85,6 +91,40 @@ def sequence_detail(sequence_id: str) -> dict[str, object]:
     if not row:
         raise HTTPException(status_code=404, detail="Sequence not found")
     return dict(row)
+
+
+@app.get("/api/sequences/{sequence_id}/revisions")
+def list_sequence_revisions(sequence_id: str) -> list[dict[str, object]]:
+    with connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT id, parent_revision_id, revision_number, label, sequence_sha256,
+                   topology, source_kind, created_at
+            FROM sequence_revisions
+            WHERE sequence_id = ?
+            ORDER BY revision_number DESC
+            """,
+            (sequence_id,),
+        ).fetchall()
+    if not rows:
+        raise HTTPException(status_code=404, detail="Sequence not found")
+    return [dict(row) for row in rows]
+
+
+@app.get("/api/jobs")
+def list_analysis_jobs(limit: int = 100) -> list[dict[str, object]]:
+    safe_limit = min(max(limit, 1), 500)
+    with connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT id, sequence_revision_id, job_kind, status, created_at, started_at,
+                   completed_at, error_detail
+            FROM analysis_jobs
+            ORDER BY created_at DESC LIMIT ?
+            """,
+            (safe_limit,),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 @app.get("/api/sequences/{sequence_id}/map")
