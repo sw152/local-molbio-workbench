@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS sequences (
     topology TEXT NOT NULL CHECK(topology IN ('circular', 'linear', 'unknown')),
     molecule_type TEXT,
     feature_count INTEGER NOT NULL,
+    features_json TEXT NOT NULL DEFAULT '[]',
     parse_warning_count INTEGER NOT NULL DEFAULT 0,
     parse_warnings_json TEXT NOT NULL DEFAULT '[]',
     raw_genbank TEXT NOT NULL,
@@ -67,6 +68,9 @@ def initialise(path: Path | None = None) -> None:
         )
         _add_column_if_missing(
             connection, "sequences", "parse_warning_count INTEGER NOT NULL DEFAULT 0"
+        )
+        _add_column_if_missing(
+            connection, "sequences", "features_json TEXT NOT NULL DEFAULT '[]'"
         )
         _add_column_if_missing(
             connection, "sequences", "parse_warnings_json TEXT NOT NULL DEFAULT '[]'"

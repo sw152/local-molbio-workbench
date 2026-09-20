@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import json
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -9,7 +10,7 @@ from fastapi.responses import FileResponse
 
 from .config import database_path
 from .database import connect, initialise
-from .importer import ImportErrorDetail, import_benchling_archive
+from .importer import ImportErrorDetail, _parse_genbank, import_benchling_archive
 
 
 @asynccontextmanager
@@ -76,7 +77,7 @@ def sequence_detail(sequence_id: str) -> dict[str, object]:
             SELECT id, import_id, archive_member_index, archive_member_name,
                    archive_member_occurrence, member_sha256, sequence_sha256,
                    display_name, length_bp, topology, molecule_type, feature_count,
-                   parse_warning_count, parse_warnings_json, created_at
+                   features_json, parse_warning_count, parse_warnings_json, created_at
             FROM sequences WHERE id = ?
             """,
             (sequence_id,),
@@ -84,6 +85,34 @@ def sequence_detail(sequence_id: str) -> dict[str, object]:
     if not row:
         raise HTTPException(status_code=404, detail="Sequence not found")
     return dict(row)
+
+
+@app.get("/api/sequences/{sequence_id}/map")
+def sequence_map(sequence_id: str) -> dict[str, object]:
+    with connect() as connection:
+        row = connection.execute(
+            """
+            SELECT id, display_name, length_bp, topology, feature_count,
+                   features_json, parse_warning_count, parse_warnings_json,
+                   archive_member_name, raw_genbank
+            FROM sequences WHERE id = ?
+            """,
+            (sequence_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Sequence not found")
+
+    result = dict(row)
+    features = json.loads(result.pop("features_json"))
+    if not features and result["feature_count"]:
+        features = _parse_genbank(
+            result.pop("raw_genbank"), result["archive_member_name"]
+        )["features"]
+    else:
+        result.pop("raw_genbank")
+    result["features"] = features
+    result["requires_annotation_review"] = bool(result["parse_warning_count"])
+    return result
 
 
 @app.post("/api/imports/benchling", status_code=201)

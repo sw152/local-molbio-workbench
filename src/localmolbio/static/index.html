@@ -14,12 +14,22 @@
       input[type="search"] { min-width: 260px; flex: 1; }
       button, input { font: inherit; padding: .5rem .7rem; }
       button { cursor: pointer; }
+      button.link { padding: 0; color: LinkText; background: transparent; border: 0; text-decoration: underline; }
       #status { min-height: 1.5rem; margin-top: .75rem; }
       table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
       th, td { padding: .6rem; text-align: left; border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, transparent); }
       th { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
       code { font-size: .85em; }
-      @media (max-width: 680px) { table { font-size: .85rem; } .hide-small { display: none; } }
+      #map-panel[hidden] { display: none; }
+      .map-layout { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(220px, .8fr); gap: 1.25rem; align-items: start; }
+      #plasmid-map { width: 100%; max-width: 540px; aspect-ratio: 1; }
+      #map-message { min-height: 1.5rem; margin: .5rem 0; }
+      .warning { color: #b45309; font-weight: 600; }
+      .legend { margin: 0; padding: 0; list-style: none; max-height: 420px; overflow: auto; }
+      .legend li { display: flex; gap: .5rem; align-items: baseline; padding: .35rem 0; border-bottom: 1px solid color-mix(in srgb, CanvasText 10%, transparent); }
+      .swatch { width: .8rem; height: .8rem; border-radius: 50%; flex: none; }
+      .muted { opacity: .68; }
+      @media (max-width: 680px) { table { font-size: .85rem; } .hide-small { display: none; } .map-layout { grid-template-columns: 1fr; } }
     </style>
   </head>
   <body>
@@ -48,17 +58,109 @@
         <button id="refresh" type="button">Refresh</button>
       </div>
       <table>
-        <thead><tr><th>Name</th><th>bp</th><th>Topology</th><th>Features</th><th>Review</th><th class="hide-small">Source member</th></tr></thead>
-        <tbody id="sequence-list"><tr><td colspan="6">No imported sequences yet.</td></tr></tbody>
+        <thead><tr><th>Name</th><th>bp</th><th>Topology</th><th>Features</th><th>Review</th><th class="hide-small">Source member</th><th>Map</th></tr></thead>
+        <tbody id="sequence-list"><tr><td colspan="7">No imported sequences yet.</td></tr></tbody>
       </table>
+    </section>
+
+    <section id="map-panel" hidden>
+      <div class="toolbar">
+        <div>
+          <h2 id="map-title">Plasmid map</h2>
+          <p id="map-summary"></p>
+        </div>
+        <button id="close-map" type="button">Close</button>
+      </div>
+      <p id="map-message" aria-live="polite"></p>
+      <div class="map-layout">
+        <svg id="plasmid-map" viewBox="0 0 500 500" role="img" aria-label="Circular plasmid map"></svg>
+        <div>
+          <h3>Features</h3>
+          <ul id="feature-legend" class="legend"></ul>
+        </div>
+      </div>
     </section>
 
     <script>
       const statusNode = document.querySelector('#status');
       const sequenceList = document.querySelector('#sequence-list');
+      const mapPanel = document.querySelector('#map-panel');
+      const mapSvg = document.querySelector('#plasmid-map');
+      const mapMessage = document.querySelector('#map-message');
+      const featureLegend = document.querySelector('#feature-legend');
 
       function escapeHtml(value) {
         return String(value).replace(/[&<>'"]/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[character]));
+      }
+
+      function featureColor(type) {
+        let hash = 0;
+        for (const character of type) hash = ((hash << 5) - hash) + character.charCodeAt(0);
+        return `hsl(${Math.abs(hash) % 360} 65% 46%)`;
+      }
+
+      function polarPoint(position, radius, length) {
+        const angle = (position / length) * Math.PI * 2 - Math.PI / 2;
+        return [250 + Math.cos(angle) * radius, 250 + Math.sin(angle) * radius];
+      }
+
+      function featureArc(segment, radius, length) {
+        const span = segment.end - segment.start;
+        if (span <= 0) return '';
+        if (span >= length) return `<circle cx="250" cy="250" r="${radius}" fill="none" />`;
+        const [startX, startY] = polarPoint(segment.start, radius, length);
+        const [endX, endY] = polarPoint(segment.end, radius, length);
+        return `<path d="M ${startX} ${startY} A ${radius} ${radius} 0 ${span / length > .5 ? 1 : 0} 1 ${endX} ${endY}" fill="none" />`;
+      }
+
+      async function showMap(sequenceId) {
+        mapPanel.hidden = false;
+        mapSvg.innerHTML = '';
+        featureLegend.innerHTML = '';
+        mapMessage.textContent = 'Loading map…';
+        try {
+          const response = await fetch(`/api/sequences/${encodeURIComponent(sequenceId)}/map`);
+          const map = await response.json();
+          if (!response.ok) throw new Error(map.detail || 'Unable to load map');
+          document.querySelector('#map-title').textContent = map.display_name;
+          document.querySelector('#map-summary').textContent = `${Number(map.length_bp).toLocaleString()} bp · ${map.topology} · ${map.feature_count} features`;
+          const review = map.requires_annotation_review
+            ? `Annotation review required: ${map.parse_warning_count} parser warning(s) were retained with this import.`
+            : 'Feature coordinates were parsed without warnings.';
+          mapMessage.textContent = review;
+          mapMessage.className = map.requires_annotation_review ? 'warning' : 'muted';
+
+          if (map.topology !== 'circular') {
+            mapSvg.innerHTML = '<text x="250" y="250" text-anchor="middle">Linear map rendering is the next step.</text>';
+            featureLegend.innerHTML = '<li class="muted">This first renderer is for circular plasmids.</li>';
+            return;
+          }
+
+          const renderable = map.features.filter(feature => feature.renderable);
+          const paths = [
+            '<circle cx="250" cy="250" r="138" fill="none" stroke="currentColor" stroke-opacity=".25" stroke-width="18" />',
+            '<text x="250" y="244" text-anchor="middle" font-size="16">Circular plasmid</text>',
+            `<text x="250" y="268" text-anchor="middle" font-size="14">${Number(map.length_bp).toLocaleString()} bp</text>`
+          ];
+          renderable.forEach((feature, index) => {
+            const color = featureColor(feature.type);
+            const radius = 138 + (index % 5) * 20;
+            feature.segments.forEach(segment => {
+              const arc = featureArc(segment, radius, map.length_bp);
+              if (arc) paths.push(arc.replace('fill="none"', `fill="none" stroke="${color}" stroke-width="12" stroke-linecap="round"`));
+            });
+          });
+          mapSvg.innerHTML = paths.join('');
+          if (!renderable.length) mapSvg.innerHTML += '<text x="250" y="310" text-anchor="middle">No renderable feature coordinates</text>';
+          featureLegend.innerHTML = map.features.map(feature => {
+            const positions = feature.segments.map(segment => `${segment.start + 1}..${segment.end}`).join(', ');
+            const status = feature.renderable ? positions : 'No renderable coordinates';
+            return `<li><span class="swatch" style="background:${featureColor(feature.type)}"></span><span><strong>${escapeHtml(feature.label)}</strong><br><span class="muted">${escapeHtml(feature.type)} · ${escapeHtml(status)}</span></span></li>`;
+          }).join('') || '<li class="muted">No features in this record.</li>';
+        } catch (error) {
+          mapMessage.textContent = `Unable to load map: ${error.message}`;
+          mapMessage.className = 'warning';
+        }
       }
 
       async function loadSequences() {
@@ -66,7 +168,7 @@
         const response = await fetch(`/api/sequences?query=${encodeURIComponent(query)}`);
         const sequences = await response.json();
         if (!sequences.length) {
-          sequenceList.innerHTML = '<tr><td colspan="6">No matching sequences.</td></tr>';
+          sequenceList.innerHTML = '<tr><td colspan="7">No matching sequences.</td></tr>';
           return;
         }
         sequenceList.innerHTML = sequences.map(sequence => `
@@ -77,6 +179,7 @@
             <td>${sequence.feature_count}</td>
             <td>${sequence.parse_warning_count ? `<span title="${sequence.parse_warning_count} parser warning(s); inspect before relying on annotations.">Review (${sequence.parse_warning_count})</span>` : 'Ready'}</td>
             <td class="hide-small"><code>${escapeHtml(sequence.archive_member_name)}${sequence.archive_member_occurrence > 1 ? ` #${sequence.archive_member_occurrence}` : ''}</code></td>
+            <td><button class="link map-button" type="button" data-sequence-id="${sequence.id}">View</button></td>
           </tr>`).join('');
       }
 
@@ -104,6 +207,11 @@
 
       document.querySelector('#refresh').addEventListener('click', loadSequences);
       document.querySelector('#search').addEventListener('input', loadSequences);
+      sequenceList.addEventListener('click', event => {
+        const button = event.target.closest('.map-button');
+        if (button) showMap(button.dataset.sequenceId);
+      });
+      document.querySelector('#close-map').addEventListener('click', () => { mapPanel.hidden = true; });
       fetch('/health').then(response => response.json()).then(() => {
         document.querySelector('#health').textContent = 'Service online';
       }).catch(() => { document.querySelector('#health').textContent = 'Service unavailable'; });

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -42,11 +43,17 @@ def test_import_preserves_duplicate_archive_member_names(tmp_path: Path, monkeyp
     assert result.parse_warning_count == 0
     with connect(database) as connection:
         rows = connection.execute(
-            "SELECT display_name, archive_member_occurrence FROM sequences ORDER BY archive_member_index"
+            """
+            SELECT display_name, archive_member_occurrence, features_json
+            FROM sequences ORDER BY archive_member_index
+            """
         ).fetchall()
     assert [(row["display_name"], row["archive_member_occurrence"]) for row in rows] == [
         ("first", 1),
         ("second", 2),
+    ]
+    assert json.loads(rows[0]["features_json"])[0]["segments"] == [
+        {"start": 0, "end": 8, "strand": 1}
     ]
 
 

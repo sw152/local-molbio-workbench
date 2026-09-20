@@ -61,7 +61,7 @@ flowchart LR
 
 ## 第一版技术选择
 
-当前原型使用 Python、FastAPI、Biopython 与 SQLite，已实现 Benchling GenBank ZIP 导入、archive/member/sequence 的 SHA-256 溯源、重复 ZIP 成员保留、解析警告保留和本地检索。
+当前原型使用 Python、FastAPI、Biopython 与 SQLite，已实现 Benchling GenBank ZIP 导入、archive/member/sequence 的 SHA-256 溯源、重复 ZIP 成员保留、解析警告保留、本地检索和圆形质粒 feature 图预览。
 
 后续按以下边界实现：
 

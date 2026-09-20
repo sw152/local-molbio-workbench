@@ -6,6 +6,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from fastapi.testclient import TestClient
 
 from localmolbio.api import app
+from localmolbio.database import connect
 
 
 def test_import_endpoint_exposes_annotation_review_status(tmp_path, monkeypatch) -> None:
@@ -39,3 +40,10 @@ ORIGIN
         detail = client.get(f"/api/sequences/{sequences.json()[0]['id']}")
         assert detail.status_code == 200
         assert "spans the origin" in detail.json()["parse_warnings_json"]
+
+        with connect() as database:
+            database.execute("UPDATE sequences SET features_json = '[]'")
+        map_response = client.get(f"/api/sequences/{sequences.json()[0]['id']}/map")
+        assert map_response.status_code == 200
+        assert map_response.json()["requires_annotation_review"] is True
+        assert map_response.json()["features"][0]["renderable"] is True
