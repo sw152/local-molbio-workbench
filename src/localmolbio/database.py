@@ -96,6 +96,24 @@ CREATE TABLE IF NOT EXISTS analysis_jobs (
 
 CREATE INDEX IF NOT EXISTS analysis_jobs_status_idx ON analysis_jobs(status, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS sequencing_reads (
+    id TEXT PRIMARY KEY,
+    sequence_revision_id TEXT NOT NULL REFERENCES sequence_revisions(id) ON DELETE RESTRICT,
+    original_filename TEXT NOT NULL,
+    file_sha256 TEXT NOT NULL,
+    storage_path TEXT NOT NULL,
+    file_format TEXT NOT NULL CHECK(file_format IN ('ab1', 'fastq')),
+    direction TEXT NOT NULL CHECK(direction IN ('forward', 'reverse', 'unknown')),
+    base_sequence TEXT NOT NULL,
+    length_bp INTEGER NOT NULL,
+    quality_summary_json TEXT NOT NULL DEFAULT '{}',
+    parser_metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    UNIQUE(sequence_revision_id, file_sha256)
+);
+
+CREATE INDEX IF NOT EXISTS sequencing_reads_revision_idx ON sequencing_reads(sequence_revision_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS audit_events (
     id TEXT PRIMARY KEY,
     object_type TEXT NOT NULL,

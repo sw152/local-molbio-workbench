@@ -14,3 +14,7 @@ def database_path() -> Path:
 
 def archive_dir() -> Path:
     return data_dir() / "archives"
+
+
+def read_dir() -> Path:
+    return data_dir() / "reads"

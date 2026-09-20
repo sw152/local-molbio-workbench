@@ -6,15 +6,16 @@ from datetime import datetime, timezone
 from io import StringIO
 import json
 from pathlib import Path
+from shutil import copyfile
 from tempfile import NamedTemporaryFile
 from typing import Literal, Optional
 from uuid import uuid4
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
-from .config import database_path
+from .config import database_path, read_dir
 from .database import connect, initialise
 from .importer import (
     ImportErrorDetail,
@@ -23,6 +24,7 @@ from .importer import (
     import_benchling_archive,
 )
 from .primer_design import PrimerDesignError, PrimerDesignSettings, design_pcr_primers
+from .sanger import SangerReadError, file_sha256, parse_ab1
 
 
 class PrimerDesignInput(BaseModel):
@@ -482,3 +484,57 @@ async def import_benchling_export(file: UploadFile = File(...)) -> dict[str, obj
         "parse_warning_count": result.parse_warning_count,
         "archive_sha256": result.archive_sha256,
     }
+
+
+@app.post("/api/sanger-reads", status_code=201)
+async def upload_sanger_read(
+    sequence_revision_id: str = Form(...),
+    direction: Literal["forward", "reverse", "unknown"] = Form("unknown"),
+    file: UploadFile = File(...),
+) -> dict[str, object]:
+    if not file.filename or not file.filename.lower().endswith(".ab1"):
+        raise HTTPException(status_code=400, detail="Upload an AB1 chromatogram file")
+    with NamedTemporaryFile(suffix=".ab1", delete=False) as temporary:
+        temporary_path = Path(temporary.name)
+        while block := await file.read(1024 * 1024):
+            temporary.write(block)
+    try:
+        read_hash = file_sha256(temporary_path)
+        parsed = parse_ab1(temporary_path)
+        destination_directory = read_dir()
+        destination_directory.mkdir(parents=True, exist_ok=True)
+        destination = destination_directory / f"{read_hash}.ab1"
+        if not destination.exists():
+            copyfile(temporary_path, destination)
+        read_id = str(uuid4())
+        now = _utc_now()
+        with connect() as connection:
+            revision = connection.execute(
+                "SELECT id FROM sequence_revisions WHERE id = ?", (sequence_revision_id,)
+            ).fetchone()
+            if not revision:
+                raise HTTPException(status_code=404, detail="Sequence revision not found")
+            duplicate = connection.execute(
+                "SELECT id FROM sequencing_reads WHERE sequence_revision_id = ? AND file_sha256 = ?",
+                (sequence_revision_id, read_hash),
+            ).fetchone()
+            if duplicate:
+                raise HTTPException(status_code=409, detail="This AB1 read is already attached to the revision")
+            connection.execute(
+                """
+                INSERT INTO sequencing_reads (
+                    id, sequence_revision_id, original_filename, file_sha256, storage_path,
+                    file_format, direction, base_sequence, length_bp, quality_summary_json,
+                    parser_metadata_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, 'ab1', ?, ?, ?, ?, ?, ?)
+                """,
+                (read_id, sequence_revision_id, file.filename, read_hash, str(destination), direction,
+                 parsed.sequence, len(parsed.sequence), json.dumps(parsed.quality_summary),
+                 json.dumps(parsed.parser_metadata), now),
+            )
+        return {"id": read_id, "length_bp": len(parsed.sequence), "direction": direction,
+                "quality_summary": parsed.quality_summary, "file_sha256": read_hash}
+    except SangerReadError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        temporary_path.unlink(missing_ok=True)
