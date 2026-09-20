@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Local Molecular Biology Workbench</title>
+    <style>
+      :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+      body { max-width: 1080px; margin: 2rem auto; padding: 0 1rem; }
+      header { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; }
+      h1 { margin-bottom: .25rem; } p { color: CanvasText; opacity: .76; }
+      section { margin: 2rem 0; padding: 1.25rem; border: 1px solid color-mix(in srgb, CanvasText 20%, transparent); border-radius: .75rem; }
+      form, .toolbar { display: flex; gap: .75rem; flex-wrap: wrap; align-items: center; }
+      input[type="search"] { min-width: 260px; flex: 1; }
+      button, input { font: inherit; padding: .5rem .7rem; }
+      button { cursor: pointer; }
+      #status { min-height: 1.5rem; margin-top: .75rem; }
+      table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+      th, td { padding: .6rem; text-align: left; border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, transparent); }
+      th { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+      code { font-size: .85em; }
+      @media (max-width: 680px) { table { font-size: .85rem; } .hide-small { display: none; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Local Molecular Biology Workbench</h1>
+        <p>Private import and sequence inventory. Data stays on this machine.</p>
+      </div>
+      <span id="health" aria-live="polite">Checking service…</span>
+    </header>
+
+    <section>
+      <h2>Import Benchling export</h2>
+      <p>Import a ZIP of GenBank records. Duplicate filenames are preserved as separate archive members.</p>
+      <form id="import-form">
+        <input id="archive" type="file" accept=".zip,application/zip" required>
+        <button type="submit">Import archive</button>
+      </form>
+      <div id="status" aria-live="polite"></div>
+    </section>
+
+    <section>
+      <h2>Sequences</h2>
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="Search display or source filename">
+        <button id="refresh" type="button">Refresh</button>
+      </div>
+      <table>
+        <thead><tr><th>Name</th><th>bp</th><th>Topology</th><th>Features</th><th>Review</th><th class="hide-small">Source member</th></tr></thead>
+        <tbody id="sequence-list"><tr><td colspan="6">No imported sequences yet.</td></tr></tbody>
+      </table>
+    </section>
+
+    <script>
+      const statusNode = document.querySelector('#status');
+      const sequenceList = document.querySelector('#sequence-list');
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>'"]/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[character]));
+      }
+
+      async function loadSequences() {
+        const query = document.querySelector('#search').value;
+        const response = await fetch(`/api/sequences?query=${encodeURIComponent(query)}`);
+        const sequences = await response.json();
+        if (!sequences.length) {
+          sequenceList.innerHTML = '<tr><td colspan="6">No matching sequences.</td></tr>';
+          return;
+        }
+        sequenceList.innerHTML = sequences.map(sequence => `
+          <tr>
+            <td>${escapeHtml(sequence.display_name)}</td>
+            <td>${Number(sequence.length_bp).toLocaleString()}</td>
+            <td>${escapeHtml(sequence.topology)}</td>
+            <td>${sequence.feature_count}</td>
+            <td>${sequence.parse_warning_count ? `<span title="${sequence.parse_warning_count} parser warning(s); inspect before relying on annotations.">Review (${sequence.parse_warning_count})</span>` : 'Ready'}</td>
+            <td class="hide-small"><code>${escapeHtml(sequence.archive_member_name)}${sequence.archive_member_occurrence > 1 ? ` #${sequence.archive_member_occurrence}` : ''}</code></td>
+          </tr>`).join('');
+      }
+
+      document.querySelector('#import-form').addEventListener('submit', async event => {
+        event.preventDefault();
+        const archive = document.querySelector('#archive').files[0];
+        if (!archive) return;
+        const payload = new FormData();
+        payload.append('file', archive);
+        statusNode.textContent = `Importing ${archive.name}…`;
+        try {
+          const response = await fetch('/api/imports/benchling', { method: 'POST', body: payload });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.detail || 'Import failed');
+          const review = result.parse_warning_count
+            ? ` ${result.parse_warning_count} parser warning(s) across ${result.parse_warning_records} record(s) were retained for review.`
+            : '';
+          statusNode.textContent = `Imported ${result.imported_records} sequence records from ${result.total_members} archive members.${review}`;
+          event.target.reset();
+          await loadSequences();
+        } catch (error) {
+          statusNode.textContent = `Import failed: ${error.message}`;
+        }
+      });
+
+      document.querySelector('#refresh').addEventListener('click', loadSequences);
+      document.querySelector('#search').addEventListener('input', loadSequences);
+      fetch('/health').then(response => response.json()).then(() => {
+        document.querySelector('#health').textContent = 'Service online';
+      }).catch(() => { document.querySelector('#health').textContent = 'Service unavailable'; });
+      loadSequences();
+    </script>
+  </body>
+</html>
