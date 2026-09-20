@@ -21,3 +21,5 @@
 - `audit_events`：记录对象发生了什么变化，为多人版的审计打基础。
 
 这四个对象是后续功能的稳定边界。UI、Primer3、ab1 解析、GPU worker 和多人权限可以迭代替换，而历史证据链保持不变。
+
+工作站、Tailscale Serve、Tailscale SSH 与多节点 worker 的边界见 [工作站指南](workstation-tailscale.zh-CN.md)。

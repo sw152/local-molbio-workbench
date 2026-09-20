@@ -22,10 +22,12 @@ Open `http://127.0.0.1:8000` in a browser. Runtime data is stored in `./var` by 
 The application binds to loopback only. Run it on the workstation and expose its local port privately through Tailscale Serve:
 
 ```bash
-tailscale serve 8000
+tailscale serve --bg localhost:8000
 ```
 
 Do not expose the database or internal worker ports to the LAN or public internet.
+
+For the complete Tailscale SSH, Serve, and future remote-worker setup, read [the workstation guide](docs/workstation-tailscale.zh-CN.md).
 
 ## Current scope
 
