@@ -82,6 +82,24 @@ def list_imports() -> list[dict[str, object]]:
     return [dict(row) for row in rows]
 
 
+@app.get("/api/dashboard")
+def dashboard() -> dict[str, int]:
+    with connect() as connection:
+        row = connection.execute(
+            """
+            SELECT
+                COUNT(*) AS sequence_count,
+                COALESCE(SUM(topology = 'circular'), 0) AS circular_count,
+                COALESCE(SUM(parse_warning_count > 0), 0) AS review_count
+            FROM sequences
+            """
+        ).fetchone()
+        selected_primers = connection.execute(
+            "SELECT COUNT(*) AS count FROM primers WHERE selection_state = 'selected'"
+        ).fetchone()["count"]
+    return {**dict(row), "selected_primer_count": selected_primers}
+
+
 @app.get("/api/sequences")
 def list_sequences(query: str = "", limit: int = 200) -> list[dict[str, object]]:
     safe_limit = min(max(limit, 1), 500)
