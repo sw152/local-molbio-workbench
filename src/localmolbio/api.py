@@ -25,6 +25,7 @@ from .importer import (
 )
 from .primer_design import PrimerDesignError, PrimerDesignSettings, design_pcr_primers
 from .sanger import SangerReadError, file_sha256, parse_ab1
+from .sanger_verification import SangerVerificationError, align_sanger_read
 
 
 class PrimerDesignInput(BaseModel):
@@ -41,6 +42,10 @@ class PrimerDesignInput(BaseModel):
 
 class PrimerSelectionInput(BaseModel):
     selection_state: Literal["selected", "archived"]
+
+
+class SangerVerificationInput(BaseModel):
+    sequencing_read_id: str
 
 
 def _utc_now() -> str:
@@ -538,3 +543,58 @@ async def upload_sanger_read(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     finally:
         temporary_path.unlink(missing_ok=True)
+
+
+@app.post("/api/sanger-verifications", status_code=201)
+def create_sanger_verification(request: SangerVerificationInput) -> dict[str, object]:
+    with connect() as connection:
+        row = connection.execute(
+            """
+            SELECT reads.id, reads.sequence_revision_id, reads.base_sequence, reads.direction,
+                   revisions.sequence_text, revisions.sequence_sha256, revisions.topology
+            FROM sequencing_reads AS reads
+            JOIN sequence_revisions AS revisions ON revisions.id = reads.sequence_revision_id
+            WHERE reads.id = ?
+            """,
+            (request.sequencing_read_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Sanger read not found")
+    try:
+        result = align_sanger_read(
+            row["sequence_text"], row["base_sequence"], row["direction"], row["topology"] == "circular"
+        )
+    except SangerVerificationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    job_id, alignment_id, now = str(uuid4()), str(uuid4()), _utc_now()
+    summary = {"identity_fraction": result.identity_fraction, "variant_count": len(result.variants)}
+    with connect() as connection:
+        existing = connection.execute(
+            "SELECT id FROM sanger_alignments WHERE sequencing_read_id = ? AND sequence_revision_id = ?",
+            (row["id"], row["sequence_revision_id"]),
+        ).fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail="This read has already been verified against the revision")
+        connection.execute(
+            """
+            INSERT INTO analysis_jobs (id, sequence_revision_id, job_kind, status, parameters_json,
+                input_manifest_json, result_summary_json, created_at, started_at, completed_at)
+            VALUES (?, ?, 'sanger-verification', 'succeeded', '{}', ?, ?, ?, ?, ?)
+            """,
+            (job_id, row["sequence_revision_id"], json.dumps({"read_id": row["id"], "reference_sha256": row["sequence_sha256"]}), json.dumps(summary), now, now, now),
+        )
+        connection.execute(
+            """
+            INSERT INTO sanger_alignments (id, sequencing_read_id, sequence_revision_id, analysis_job_id,
+                reference_start, reference_end, wraps_origin, aligned_bases, matched_bases,
+                mismatched_bases, inserted_bases, deleted_bases, identity_fraction, variants_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (alignment_id, row["id"], row["sequence_revision_id"], job_id, result.reference_start,
+             result.reference_end, int(result.wraps_origin), result.aligned_bases, result.matched_bases,
+             result.mismatched_bases, result.inserted_bases, result.deleted_bases,
+             result.identity_fraction, json.dumps(result.variants), now),
+        )
+    return {"id": alignment_id, "job_id": job_id, **summary, "variants": result.variants,
+            "reference_start": result.reference_start, "reference_end": result.reference_end,
+            "wraps_origin": result.wraps_origin}

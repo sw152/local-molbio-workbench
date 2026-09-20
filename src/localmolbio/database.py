@@ -114,6 +114,27 @@ CREATE TABLE IF NOT EXISTS sequencing_reads (
 
 CREATE INDEX IF NOT EXISTS sequencing_reads_revision_idx ON sequencing_reads(sequence_revision_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS sanger_alignments (
+    id TEXT PRIMARY KEY,
+    sequencing_read_id TEXT NOT NULL REFERENCES sequencing_reads(id) ON DELETE RESTRICT,
+    sequence_revision_id TEXT NOT NULL REFERENCES sequence_revisions(id) ON DELETE RESTRICT,
+    analysis_job_id TEXT NOT NULL REFERENCES analysis_jobs(id) ON DELETE RESTRICT,
+    reference_start INTEGER NOT NULL,
+    reference_end INTEGER NOT NULL,
+    wraps_origin INTEGER NOT NULL DEFAULT 0,
+    aligned_bases INTEGER NOT NULL,
+    matched_bases INTEGER NOT NULL,
+    mismatched_bases INTEGER NOT NULL,
+    inserted_bases INTEGER NOT NULL,
+    deleted_bases INTEGER NOT NULL,
+    identity_fraction REAL NOT NULL,
+    variants_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    UNIQUE(sequencing_read_id, sequence_revision_id)
+);
+
+CREATE INDEX IF NOT EXISTS sanger_alignments_revision_idx ON sanger_alignments(sequence_revision_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS audit_events (
     id TEXT PRIMARY KEY,
     object_type TEXT NOT NULL,
