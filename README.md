@@ -36,6 +36,7 @@ Do not expose the database or internal worker ports to the LAN or public interne
 - Per-record parser-warning retention for annotation review
 - Searchable local sequence inventory
 - Circular plasmid-map preview with feature tracks and source-coordinate review status
+- Primer3-backed PCR candidate generation with persisted design parameters and evidence
 
 Real Benchling exports are private research data. Keep them outside the repository. The test suite uses synthetic records only.
 

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from typing import Literal, Optional
+from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from .config import database_path
 from .database import connect, initialise
@@ -16,6 +20,23 @@ from .importer import (
     ensure_initial_revisions,
     import_benchling_archive,
 )
+from .primer_design import PrimerDesignError, PrimerDesignSettings, design_pcr_primers
+
+
+class PrimerDesignInput(BaseModel):
+    sequence_revision_id: str
+    purpose: Literal["pcr"] = "pcr"
+    name_prefix: Optional[str] = Field(default=None, max_length=100)
+    product_size_min: int = Field(default=100, ge=50, le=10_000)
+    product_size_max: int = Field(default=800, ge=51, le=10_000)
+    num_return: int = Field(default=5, ge=1, le=25)
+    min_tm: float = Field(default=57.0, ge=40.0, le=80.0)
+    opt_tm: float = Field(default=60.0, ge=40.0, le=80.0)
+    max_tm: float = Field(default=63.0, ge=40.0, le=80.0)
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 @asynccontextmanager
@@ -127,6 +148,156 @@ def list_analysis_jobs(limit: int = 100) -> list[dict[str, object]]:
     return [dict(row) for row in rows]
 
 
+@app.get("/api/revisions/{revision_id}/primers")
+def list_primers(revision_id: str) -> list[dict[str, object]]:
+    with connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT id, name, sequence_text, direction, purpose, binding_start,
+                   binding_end, metrics_json, design_parameters_json,
+                   selection_state, created_at
+            FROM primers
+            WHERE sequence_revision_id = ?
+            ORDER BY created_at DESC, name COLLATE NOCASE
+            """,
+            (revision_id,),
+        ).fetchall()
+        revision_exists = connection.execute(
+            "SELECT 1 FROM sequence_revisions WHERE id = ?", (revision_id,)
+        ).fetchone()
+    if not revision_exists:
+        raise HTTPException(status_code=404, detail="Sequence revision not found")
+    primers = []
+    for row in rows:
+        item = dict(row)
+        item["metrics"] = json.loads(item.pop("metrics_json"))
+        item["design_parameters"] = json.loads(item.pop("design_parameters_json"))
+        primers.append(item)
+    return primers
+
+
+@app.post("/api/primer-designs", status_code=201)
+def create_primer_design(request: PrimerDesignInput) -> dict[str, object]:
+    settings = PrimerDesignSettings(
+        product_size_min=request.product_size_min,
+        product_size_max=request.product_size_max,
+        num_return=request.num_return,
+        min_tm=request.min_tm,
+        opt_tm=request.opt_tm,
+        max_tm=request.max_tm,
+    )
+    parameters = request.model_dump()
+    job_id = str(uuid4())
+    now = _utc_now()
+    with connect() as connection:
+        revision = connection.execute(
+            """
+            SELECT id, label, sequence_text, sequence_sha256
+            FROM sequence_revisions WHERE id = ?
+            """,
+            (request.sequence_revision_id,),
+        ).fetchone()
+        if not revision:
+            raise HTTPException(status_code=404, detail="Sequence revision not found")
+        connection.execute(
+            """
+            INSERT INTO analysis_jobs (
+                id, sequence_revision_id, job_kind, status, parameters_json,
+                input_manifest_json, result_summary_json, created_at, started_at
+            ) VALUES (?, ?, 'primer-design', 'running', ?, ?, '{}', ?, ?)
+            """,
+            (
+                job_id,
+                revision["id"],
+                json.dumps(parameters),
+                json.dumps({"sequence_sha256": revision["sequence_sha256"]}),
+                now,
+                now,
+            ),
+        )
+    try:
+        pairs = design_pcr_primers(revision["sequence_text"], settings)
+    except PrimerDesignError as exc:
+        with connect() as connection:
+            connection.execute(
+                """
+                UPDATE analysis_jobs
+                SET status = 'failed', error_detail = ?, completed_at = ?
+                WHERE id = ?
+                """,
+                (str(exc), _utc_now(), job_id),
+            )
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    created_primers: list[dict[str, object]] = []
+    prefix = request.name_prefix or revision["label"]
+    with connect() as connection:
+        for pair in pairs:
+            for direction, item, suffix in (
+                ("forward", pair["left"], "F"),
+                ("reverse", pair["right"], "R"),
+            ):
+                primer_id = str(uuid4())
+                metrics = {
+                    "tm": item["tm"],
+                    "gc_percent": item["gc_percent"],
+                    "self_any_th": item["self_any_th"],
+                    "self_end_th": item["self_end_th"],
+                    "product_size": pair["product_size"],
+                    "pair_index": pair["pair_index"],
+                }
+                name = f"{prefix}-{suffix}{pair['pair_index']}"
+                connection.execute(
+                    """
+                    INSERT INTO primers (
+                        id, sequence_revision_id, name, sequence_text, direction,
+                        purpose, binding_start, binding_end, metrics_json,
+                        design_parameters_json, selection_state, created_at
+                    ) VALUES (?, ?, ?, ?, ?, 'pcr', ?, ?, ?, ?, 'candidate', ?)
+                    """,
+                    (
+                        primer_id,
+                        revision["id"],
+                        name,
+                        item["sequence"],
+                        direction,
+                        item["binding_start"],
+                        item["binding_end"],
+                        json.dumps(metrics),
+                        json.dumps(parameters),
+                        now,
+                    ),
+                )
+                created_primers.append(
+                    {
+                        "id": primer_id,
+                        "name": name,
+                        "direction": direction,
+                        "sequence": item["sequence"],
+                        "binding_start": item["binding_start"],
+                        "binding_end": item["binding_end"],
+                        "metrics": metrics,
+                    }
+                )
+        summary = {"pair_count": len(pairs), "primer_count": len(created_primers)}
+        connection.execute(
+            """
+            UPDATE analysis_jobs
+            SET status = 'succeeded', result_summary_json = ?, completed_at = ?
+            WHERE id = ?
+            """,
+            (json.dumps(summary), _utc_now(), job_id),
+        )
+        connection.execute(
+            """
+            INSERT INTO audit_events (id, object_type, object_id, action, payload_json, created_at)
+            VALUES (?, 'analysis_job', ?, 'primer-design.completed', ?, ?)
+            """,
+            (str(uuid4()), job_id, json.dumps(summary), _utc_now()),
+        )
+    return {"job_id": job_id, "pairs": pairs, "primers": created_primers}
+
+
 @app.get("/api/sequences/{sequence_id}/map")
 def sequence_map(sequence_id: str) -> dict[str, object]:
     with connect() as connection:
@@ -134,7 +305,12 @@ def sequence_map(sequence_id: str) -> dict[str, object]:
             """
             SELECT id, display_name, length_bp, topology, feature_count,
                    features_json, parse_warning_count, parse_warnings_json,
-                   archive_member_name, raw_genbank
+                   archive_member_name, raw_genbank,
+                   (
+                       SELECT id FROM sequence_revisions
+                       WHERE sequence_id = sequences.id
+                       ORDER BY revision_number DESC LIMIT 1
+                   ) AS current_revision_id
             FROM sequences WHERE id = ?
             """,
             (sequence_id,),

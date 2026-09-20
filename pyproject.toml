@@ -12,6 +12,7 @@ license = {text = "Apache-2.0"}
 dependencies = [
   "biopython>=1.83,<2",
   "fastapi>=0.115,<1",
+  "primer3-py>=2.2,<3",
   "python-multipart>=0.0.9,<1",
   "uvicorn[standard]>=0.30,<1",
 ]

@@ -29,6 +29,13 @@
       .legend li { display: flex; gap: .5rem; align-items: baseline; padding: .35rem 0; border-bottom: 1px solid color-mix(in srgb, CanvasText 10%, transparent); }
       .swatch { width: .8rem; height: .8rem; border-radius: 50%; flex: none; }
       .muted { opacity: .68; }
+      .design-grid { display: grid; grid-template-columns: repeat(3, minmax(130px, 1fr)); gap: .75rem; }
+      .design-grid label { display: grid; gap: .3rem; font-size: .9rem; }
+      .design-grid input { min-width: 0; }
+      #primer-status { min-height: 1.5rem; margin-top: .75rem; }
+      #primer-results { margin-top: 1rem; overflow-x: auto; }
+      #primer-results table { min-width: 680px; }
+      @media (max-width: 680px) { .design-grid { grid-template-columns: 1fr 1fr; } }
       @media (max-width: 680px) { table { font-size: .85rem; } .hide-small { display: none; } .map-layout { grid-template-columns: 1fr; } }
     </style>
   </head>
@@ -79,6 +86,19 @@
           <ul id="feature-legend" class="legend"></ul>
         </div>
       </div>
+      <div>
+        <h3>Design PCR primers</h3>
+        <p class="muted">Candidates are generated against the current immutable sequence revision and retained as evidence.</p>
+        <form id="primer-form" class="design-grid">
+          <label>Name prefix<input name="name_prefix" maxlength="100" placeholder="e.g. construct-A"></label>
+          <label>Product min (bp)<input name="product_size_min" type="number" min="50" value="100" required></label>
+          <label>Product max (bp)<input name="product_size_max" type="number" min="51" value="800" required></label>
+          <label>Candidate pairs<input name="num_return" type="number" min="1" max="25" value="5" required></label>
+          <button type="submit">Generate candidates</button>
+        </form>
+        <div id="primer-status" aria-live="polite"></div>
+        <div id="primer-results"></div>
+      </div>
     </section>
 
     <script>
@@ -88,6 +108,10 @@
       const mapSvg = document.querySelector('#plasmid-map');
       const mapMessage = document.querySelector('#map-message');
       const featureLegend = document.querySelector('#feature-legend');
+      const primerForm = document.querySelector('#primer-form');
+      const primerStatus = document.querySelector('#primer-status');
+      const primerResults = document.querySelector('#primer-results');
+      let activeRevisionId = null;
 
       function escapeHtml(value) {
         return String(value).replace(/[&<>'"]/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[character]));
@@ -113,6 +137,23 @@
         return `<path d="M ${startX} ${startY} A ${radius} ${radius} 0 ${span / length > .5 ? 1 : 0} 1 ${endX} ${endY}" fill="none" />`;
       }
 
+      function numberMetric(value) {
+        return Number.isFinite(Number(value)) ? Number(value).toFixed(1) : '—';
+      }
+
+      async function loadPrimers() {
+        if (!activeRevisionId) return;
+        const response = await fetch(`/api/revisions/${encodeURIComponent(activeRevisionId)}/primers`);
+        const primers = await response.json();
+        if (!response.ok) throw new Error(primers.detail || 'Unable to load primer candidates');
+        if (!primers.length) {
+          primerResults.innerHTML = '<p class="muted">No primer candidates have been generated for this revision.</p>';
+          return;
+        }
+        primerResults.innerHTML = `<table><thead><tr><th>Name</th><th>Direction</th><th>Sequence</th><th>Binding</th><th>Tm</th><th>GC%</th><th>Status</th></tr></thead><tbody>${primers.map(primer => `
+          <tr><td>${escapeHtml(primer.name || 'Unnamed')}</td><td>${escapeHtml(primer.direction)}</td><td><code>${escapeHtml(primer.sequence_text)}</code></td><td>${Number(primer.binding_start) + 1}..${primer.binding_end}</td><td>${numberMetric(primer.metrics.tm)}</td><td>${numberMetric(primer.metrics.gc_percent)}</td><td>${escapeHtml(primer.selection_state)}</td></tr>`).join('')}</tbody></table>`;
+      }
+
       async function showMap(sequenceId) {
         mapPanel.hidden = false;
         mapSvg.innerHTML = '';
@@ -124,6 +165,10 @@
           if (!response.ok) throw new Error(map.detail || 'Unable to load map');
           document.querySelector('#map-title').textContent = map.display_name;
           document.querySelector('#map-summary').textContent = `${Number(map.length_bp).toLocaleString()} bp · ${map.topology} · ${map.feature_count} features`;
+          activeRevisionId = map.current_revision_id;
+          primerStatus.textContent = '';
+          primerResults.innerHTML = '';
+          await loadPrimers();
           const review = map.requires_annotation_review
             ? `Annotation review required: ${map.parse_warning_count} parser warning(s) were retained with this import.`
             : 'Feature coordinates were parsed without warnings.';
@@ -212,6 +257,32 @@
         if (button) showMap(button.dataset.sequenceId);
       });
       document.querySelector('#close-map').addEventListener('click', () => { mapPanel.hidden = true; });
+      primerForm.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (!activeRevisionId) return;
+        const data = new FormData(primerForm);
+        const payload = {
+          sequence_revision_id: activeRevisionId,
+          name_prefix: data.get('name_prefix') || null,
+          product_size_min: Number(data.get('product_size_min')),
+          product_size_max: Number(data.get('product_size_max')),
+          num_return: Number(data.get('num_return')),
+        };
+        primerStatus.textContent = 'Generating candidates…';
+        try {
+          const response = await fetch('/api/primer-designs', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.detail || 'Primer design failed');
+          primerStatus.textContent = `Generated ${result.pairs.length} candidate pair(s) and recorded task ${result.job_id}.`;
+          await loadPrimers();
+        } catch (error) {
+          primerStatus.textContent = `Primer design failed: ${error.message}`;
+        }
+      });
       fetch('/health').then(response => response.json()).then(() => {
         document.querySelector('#health').textContent = 'Service online';
       }).catch(() => { document.querySelector('#health').textContent = 'Service unavailable'; });
