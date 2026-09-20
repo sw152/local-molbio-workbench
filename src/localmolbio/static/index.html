@@ -96,6 +96,7 @@
           <label>Candidate pairs<input name="num_return" type="number" min="1" max="25" value="5" required></label>
           <button type="submit">Generate candidates</button>
         </form>
+        <button id="export-primers" type="button">Export selected primers (CSV)</button>
         <div id="primer-status" aria-live="polite"></div>
         <div id="primer-results"></div>
       </div>
@@ -111,6 +112,7 @@
       const primerForm = document.querySelector('#primer-form');
       const primerStatus = document.querySelector('#primer-status');
       const primerResults = document.querySelector('#primer-results');
+      const exportPrimers = document.querySelector('#export-primers');
       let activeRevisionId = null;
 
       function escapeHtml(value) {
@@ -150,8 +152,8 @@
           primerResults.innerHTML = '<p class="muted">No primer candidates have been generated for this revision.</p>';
           return;
         }
-        primerResults.innerHTML = `<table><thead><tr><th>Name</th><th>Direction</th><th>Sequence</th><th>Binding</th><th>Tm</th><th>GC%</th><th>Status</th></tr></thead><tbody>${primers.map(primer => `
-          <tr><td>${escapeHtml(primer.name || 'Unnamed')}</td><td>${escapeHtml(primer.direction)}</td><td><code>${escapeHtml(primer.sequence_text)}</code></td><td>${Number(primer.binding_start) + 1}..${primer.binding_end}</td><td>${numberMetric(primer.metrics.tm)}</td><td>${numberMetric(primer.metrics.gc_percent)}</td><td>${escapeHtml(primer.selection_state)}</td></tr>`).join('')}</tbody></table>`;
+        primerResults.innerHTML = `<table><thead><tr><th>Name</th><th>Direction</th><th>Sequence</th><th>Binding</th><th>Tm</th><th>GC%</th><th>Status</th><th>Action</th></tr></thead><tbody>${primers.map(primer => `
+          <tr><td>${escapeHtml(primer.name || 'Unnamed')}</td><td>${escapeHtml(primer.direction)}</td><td><code>${escapeHtml(primer.sequence_text)}</code></td><td>${Number(primer.binding_start) + 1}..${primer.binding_end}</td><td>${numberMetric(primer.metrics.tm)}</td><td>${numberMetric(primer.metrics.gc_percent)}</td><td>${escapeHtml(primer.selection_state)}</td><td>${primer.selection_state !== 'selected' ? `<button class="link primer-action" data-primer-id="${primer.id}" data-state="selected" type="button">Select</button>` : ''} ${primer.selection_state !== 'archived' ? `<button class="link primer-action" data-primer-id="${primer.id}" data-state="archived" type="button">Archive</button>` : ''}</td></tr>`).join('')}</tbody></table>`;
       }
 
       async function showMap(sequenceId) {
@@ -282,6 +284,26 @@
         } catch (error) {
           primerStatus.textContent = `Primer design failed: ${error.message}`;
         }
+      });
+      primerResults.addEventListener('click', async event => {
+        const button = event.target.closest('.primer-action');
+        if (!button) return;
+        try {
+          const response = await fetch(`/api/primers/${encodeURIComponent(button.dataset.primerId)}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({selection_state: button.dataset.state}),
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.detail || 'Unable to update primer');
+          primerStatus.textContent = `Primer marked ${result.selection_state}.`;
+          await loadPrimers();
+        } catch (error) {
+          primerStatus.textContent = `Unable to update primer: ${error.message}`;
+        }
+      });
+      exportPrimers.addEventListener('click', () => {
+        if (activeRevisionId) window.location.href = `/api/revisions/${encodeURIComponent(activeRevisionId)}/primers.csv`;
       });
       fetch('/health').then(response => response.json()).then(() => {
         document.querySelector('#health').textContent = 'Service online';

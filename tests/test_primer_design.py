@@ -56,6 +56,17 @@ ORIGIN
         assert len(saved_primers.json()) == len(body["primers"])
         assert saved_primers.json()[0]["metrics"]["tm"] > 40
 
+        selected = client.patch(
+            f"/api/primers/{body['primers'][0]['id']}",
+            json={"selection_state": "selected"},
+        )
+        assert selected.status_code == 200
+        assert selected.json()["selection_state"] == "selected"
+        exported = client.get(f"/api/revisions/{revision_id}/primers.csv")
+        assert exported.status_code == 200
+        assert "demo-F1" in exported.text
+        assert "source_revision_id" in exported.text
+
         jobs = client.get("/api/jobs").json()
         assert jobs[0]["id"] == body["job_id"]
         assert jobs[0]["status"] == "succeeded"

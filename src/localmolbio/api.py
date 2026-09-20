@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import csv
 from datetime import datetime, timezone
+from io import StringIO
 import json
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -9,7 +11,7 @@ from typing import Literal, Optional
 from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from .config import database_path
@@ -33,6 +35,10 @@ class PrimerDesignInput(BaseModel):
     min_tm: float = Field(default=57.0, ge=40.0, le=80.0)
     opt_tm: float = Field(default=60.0, ge=40.0, le=80.0)
     max_tm: float = Field(default=63.0, ge=40.0, le=80.0)
+
+
+class PrimerSelectionInput(BaseModel):
+    selection_state: Literal["selected", "archived"]
 
 
 def _utc_now() -> str:
@@ -174,6 +180,107 @@ def list_primers(revision_id: str) -> list[dict[str, object]]:
         item["design_parameters"] = json.loads(item.pop("design_parameters_json"))
         primers.append(item)
     return primers
+
+
+@app.patch("/api/primers/{primer_id}")
+def update_primer_selection(
+    primer_id: str, update: PrimerSelectionInput
+) -> dict[str, object]:
+    now = _utc_now()
+    with connect() as connection:
+        primer = connection.execute(
+            """
+            SELECT id, sequence_revision_id, name, selection_state
+            FROM primers WHERE id = ?
+            """,
+            (primer_id,),
+        ).fetchone()
+        if not primer:
+            raise HTTPException(status_code=404, detail="Primer not found")
+        connection.execute(
+            "UPDATE primers SET selection_state = ? WHERE id = ?",
+            (update.selection_state, primer_id),
+        )
+        connection.execute(
+            """
+            INSERT INTO audit_events (id, object_type, object_id, action, payload_json, created_at)
+            VALUES (?, 'primer', ?, 'primer.selection-updated', ?, ?)
+            """,
+            (
+                str(uuid4()),
+                primer_id,
+                json.dumps(
+                    {
+                        "from": primer["selection_state"],
+                        "to": update.selection_state,
+                        "sequence_revision_id": primer["sequence_revision_id"],
+                    }
+                ),
+                now,
+            ),
+        )
+    return {"id": primer_id, "selection_state": update.selection_state}
+
+
+@app.get("/api/revisions/{revision_id}/primers.csv")
+def export_selected_primers(revision_id: str) -> Response:
+    with connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT name, sequence_text, direction, purpose, binding_start, binding_end,
+                   metrics_json, created_at
+            FROM primers
+            WHERE sequence_revision_id = ? AND selection_state = 'selected'
+            ORDER BY name COLLATE NOCASE
+            """,
+            (revision_id,),
+        ).fetchall()
+        revision_exists = connection.execute(
+            "SELECT 1 FROM sequence_revisions WHERE id = ?", (revision_id,)
+        ).fetchone()
+    if not revision_exists:
+        raise HTTPException(status_code=404, detail="Sequence revision not found")
+
+    output = StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "name",
+            "sequence",
+            "direction",
+            "purpose",
+            "binding_start_1_based",
+            "binding_end_1_based_inclusive",
+            "tm_celsius",
+            "gc_percent",
+            "source_revision_id",
+            "created_at",
+        ],
+    )
+    writer.writeheader()
+    for row in rows:
+        metrics = json.loads(row["metrics_json"])
+        writer.writerow(
+            {
+                "name": row["name"] or "",
+                "sequence": row["sequence_text"],
+                "direction": row["direction"],
+                "purpose": row["purpose"],
+                "binding_start_1_based": row["binding_start"] + 1,
+                "binding_end_1_based_inclusive": row["binding_end"],
+                "tm_celsius": metrics.get("tm", ""),
+                "gc_percent": metrics.get("gc_percent", ""),
+                "source_revision_id": revision_id,
+                "created_at": row["created_at"],
+            }
+        )
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="selected-primers-{revision_id}.csv"'
+        },
+    )
 
 
 @app.post("/api/primer-designs", status_code=201)
