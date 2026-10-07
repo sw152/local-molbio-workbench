@@ -174,6 +174,8 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
 def initialise(path: Path | None = None) -> None:
     with connect(path) as connection:
         connection.executescript(SCHEMA)
+        from .job_queue import SCHEMA as QUEUE_SCHEMA
+        connection.executescript(QUEUE_SCHEMA)
         _add_column_if_missing(connection, "sequencing_reads", "qualities_json TEXT NOT NULL DEFAULT '[]'")
         _add_column_if_missing(connection, "sanger_alignments", "evidence_json TEXT NOT NULL DEFAULT '{}'")
         # Additive migration: retain legacy rows and preserve their IDs, jobs and evidence.

@@ -338,3 +338,11 @@ to one another. Repeat-shiftable, complex or inconsistent evidence stays withhel
 The API marks this scope as `exact_event_vs_reference_only`; there is no event
 normalization, consensus or whole-plasmid pass verdict. UI source links open the
 original peaks, and group JSON/HTML exports retain the comparisons.
+
+## Durable queue foundation
+
+The internal `localmolbio.job_queue` module now supports idempotent submission,
+atomic claims, expiring leases, fenced completion, bounded retries and cancellation
+with persisted attempt history. Existing synchronous analyses remain unchanged.
+This is a single-host SQLite foundation: no sequencing adapter, batch UI or daemon
+is started. See [queue interfaces and execution limits](docs/job-queue.zh-CN.md).
