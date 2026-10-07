@@ -160,6 +160,8 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
 def initialise(path: Path | None = None) -> None:
     with connect(path) as connection:
         connection.executescript(SCHEMA)
+        _add_column_if_missing(connection, "sequencing_reads", "qualities_json TEXT NOT NULL DEFAULT '[]'")
+        _add_column_if_missing(connection, "sanger_alignments", "evidence_json TEXT NOT NULL DEFAULT '{}'")
         _add_column_if_missing(
             connection, "imports", "parse_warning_records INTEGER NOT NULL DEFAULT 0"
         )

@@ -96,3 +96,58 @@ ORIGIN
     assert imported.status_code == 201
     assert uploaded.status_code == 201
     assert uploaded.json()["quality_summary"]["mean_phred"] == 35.0
+
+
+def test_sanger_evidence_survives_reload_and_records_inputs(tmp_path, monkeypatch):
+    from Bio import SeqIO
+    from Bio.Seq import Seq
+    from Bio.SeqRecord import SeqRecord
+    from io import StringIO
+    import json
+
+    reference = "ATCGGATCAGGTACGTTAGCTACGTGGTACCACTGATCCGAGTACGTAGCTACGACATCG"
+    monkeypatch.setenv("MOLBIO_DATA_DIR", str(tmp_path / "runtime"))
+    monkeypatch.setattr("localmolbio.api.parse_ab1", lambda _: SangerRead(
+        reference[-30:], {"mean_phred": 40, "q20_fraction": 1}, {}, [40] * 30,
+    ))
+    record = SeqRecord(Seq(reference), id="synthetic", name="synthetic", annotations={"molecule_type": "DNA", "topology": "linear"})
+    handle = StringIO()
+    SeqIO.write(record, handle, "genbank")
+    archive = BytesIO()
+    with ZipFile(archive, "w") as zipper:
+        zipper.writestr("synthetic.gb", handle.getvalue())
+    with TestClient(app) as client:
+        assert client.post("/api/imports/benchling", files={"file": ("synthetic.zip", archive.getvalue())}).status_code == 201
+        sequence_id = client.get("/api/sequences").json()[0]["id"]
+        revision = client.get(f"/api/sequences/{sequence_id}/revisions").json()[0]["id"]
+        uploaded = client.post("/api/sanger-reads", data={"sequence_revision_id": revision}, files={"file": ("synthetic.ab1", b"fixture")})
+        assert uploaded.status_code == 201
+        result = client.post("/api/sanger-verifications", json={"sequencing_read_id": uploaded.json()["id"]})
+        assert result.status_code == 201, result.text
+        evidence = result.json()["evidence"]
+        assert evidence["direction"] == "forward"
+        assert evidence["review_flags"] == []
+        assert result.json()["reference_end"] == len(reference)
+        assert evidence["whole_reference_verified"] is False
+        assert client.post("/api/sanger-verifications", json={"sequencing_read_id": uploaded.json()["id"]}).status_code == 409
+    with TestClient(app) as client:
+        saved = client.get(f"/api/sequence-revisions/{revision}/sanger-reads").json()[0]
+        assert saved["evidence"] == evidence
+        assert "storage_path" not in saved
+        assert client.get("/api/sequence-revisions/missing/sanger-reads").status_code == 404
+        with connect() as db:
+            job = db.execute("SELECT * FROM analysis_jobs WHERE job_kind = 'sanger-verification'").fetchone()
+            assert json.loads(job["parameters_json"])["evidence_version"] == 2
+            assert json.loads(job["input_manifest_json"])["read_sha256"] == uploaded.json()["file_sha256"]
+            assert len(json.loads(db.execute("SELECT qualities_json FROM sequencing_reads").fetchone()[0])) == 30
+
+
+def test_missing_revision_rejected_before_ab1_parse(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOLBIO_DATA_DIR", str(tmp_path / "runtime"))
+    def unexpected_parse(_):
+        raise AssertionError("Should validate revision before parsing or storing read")
+    monkeypatch.setattr("localmolbio.api.parse_ab1", unexpected_parse)
+    with TestClient(app) as client:
+        response = client.post("/api/sanger-reads", data={"sequence_revision_id": "missing"}, files={"file": ("trace.ab1", b"fixture")})
+        assert response.status_code == 404
+        assert not (tmp_path / "runtime" / "reads").exists()

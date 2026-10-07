@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
 from statistics import mean
@@ -17,6 +17,7 @@ class SangerRead:
     sequence: str
     quality_summary: dict[str, float | int]
     parser_metadata: dict[str, str]
+    qualities: list[int] = field(default_factory=list)
 
 
 def file_sha256(path: Path) -> str:
@@ -53,4 +54,4 @@ def parse_ab1(path: Path) -> SangerRead:
         for key in ("SMPL1", "CMNT1", "PDMF1", "RUND1")
         if key in raw
     }
-    return SangerRead(sequence=sequence, quality_summary=summary, parser_metadata=metadata)
+    return SangerRead(sequence=sequence, quality_summary=summary, parser_metadata=metadata, qualities=qualities)

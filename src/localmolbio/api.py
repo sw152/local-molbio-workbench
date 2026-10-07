@@ -25,7 +25,7 @@ from .importer import (
 )
 from .primer_design import PrimerDesignError, PrimerDesignSettings, design_pcr_primers
 from .sanger import SangerReadError, file_sha256, parse_ab1
-from .sanger_verification import SangerVerificationError, align_sanger_read
+from .sanger_verification import ALIGNMENT_PARAMETERS, SangerVerificationError, align_sanger_read
 
 
 class PrimerDesignInput(BaseModel):
@@ -499,6 +499,9 @@ async def upload_sanger_read(
 ) -> dict[str, object]:
     if not file.filename or not file.filename.lower().endswith(".ab1"):
         raise HTTPException(status_code=400, detail="Upload an AB1 chromatogram file")
+    with connect() as connection:
+        if not connection.execute("SELECT id FROM sequence_revisions WHERE id = ?", (sequence_revision_id,)).fetchone():
+            raise HTTPException(status_code=404, detail="Sequence revision not found")
     with NamedTemporaryFile(suffix=".ab1", delete=False) as temporary:
         temporary_path = Path(temporary.name)
         while block := await file.read(1024 * 1024):
@@ -530,12 +533,12 @@ async def upload_sanger_read(
                 INSERT INTO sequencing_reads (
                     id, sequence_revision_id, original_filename, file_sha256, storage_path,
                     file_format, direction, base_sequence, length_bp, quality_summary_json,
-                    parser_metadata_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, 'ab1', ?, ?, ?, ?, ?, ?)
+                    parser_metadata_json, created_at, qualities_json
+                ) VALUES (?, ?, ?, ?, ?, 'ab1', ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (read_id, sequence_revision_id, file.filename, read_hash, str(destination), direction,
                  parsed.sequence, len(parsed.sequence), json.dumps(parsed.quality_summary),
-                 json.dumps(parsed.parser_metadata), now),
+                 json.dumps(parsed.parser_metadata), now, json.dumps(parsed.qualities)),
             )
         return {"id": read_id, "length_bp": len(parsed.sequence), "direction": direction,
                 "quality_summary": parsed.quality_summary, "file_sha256": read_hash}
@@ -551,6 +554,7 @@ def create_sanger_verification(request: SangerVerificationInput) -> dict[str, ob
         row = connection.execute(
             """
             SELECT reads.id, reads.sequence_revision_id, reads.base_sequence, reads.direction,
+                   reads.qualities_json, reads.file_sha256,
                    revisions.sequence_text, revisions.sequence_sha256, revisions.topology
             FROM sequencing_reads AS reads
             JOIN sequence_revisions AS revisions ON revisions.id = reads.sequence_revision_id
@@ -562,12 +566,13 @@ def create_sanger_verification(request: SangerVerificationInput) -> dict[str, ob
         raise HTTPException(status_code=404, detail="Sanger read not found")
     try:
         result = align_sanger_read(
-            row["sequence_text"], row["base_sequence"], row["direction"], row["topology"] == "circular"
+            row["sequence_text"], row["base_sequence"], row["direction"], row["topology"] == "circular",
+            qualities=json.loads(row["qualities_json"]) or None
         )
     except SangerVerificationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     job_id, alignment_id, now = str(uuid4()), str(uuid4()), _utc_now()
-    summary = {"identity_fraction": result.identity_fraction, "variant_count": len(result.variants)}
+    summary = {"identity_fraction": result.identity_fraction, "variant_count": len(result.variants), "evidence": result.evidence}
     with connect() as connection:
         existing = connection.execute(
             "SELECT id FROM sanger_alignments WHERE sequencing_read_id = ? AND sequence_revision_id = ?",
@@ -579,22 +584,48 @@ def create_sanger_verification(request: SangerVerificationInput) -> dict[str, ob
             """
             INSERT INTO analysis_jobs (id, sequence_revision_id, job_kind, status, parameters_json,
                 input_manifest_json, result_summary_json, created_at, started_at, completed_at)
-            VALUES (?, ?, 'sanger-verification', 'succeeded', '{}', ?, ?, ?, ?, ?)
+            VALUES (?, ?, 'sanger-verification', 'succeeded', ?, ?, ?, ?, ?, ?)
             """,
-            (job_id, row["sequence_revision_id"], json.dumps({"read_id": row["id"], "reference_sha256": row["sequence_sha256"]}), json.dumps(summary), now, now, now),
+            (job_id, row["sequence_revision_id"], json.dumps(ALIGNMENT_PARAMETERS), json.dumps({"read_id": row["id"], "read_sha256": row["file_sha256"], "reference_sha256": row["sequence_sha256"]}), json.dumps(summary), now, now, now),
         )
         connection.execute(
             """
             INSERT INTO sanger_alignments (id, sequencing_read_id, sequence_revision_id, analysis_job_id,
                 reference_start, reference_end, wraps_origin, aligned_bases, matched_bases,
-                mismatched_bases, inserted_bases, deleted_bases, identity_fraction, variants_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                mismatched_bases, inserted_bases, deleted_bases, identity_fraction, variants_json, created_at, evidence_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (alignment_id, row["id"], row["sequence_revision_id"], job_id, result.reference_start,
              result.reference_end, int(result.wraps_origin), result.aligned_bases, result.matched_bases,
              result.mismatched_bases, result.inserted_bases, result.deleted_bases,
-             result.identity_fraction, json.dumps(result.variants), now),
+             result.identity_fraction, json.dumps(result.variants), now, json.dumps(result.evidence)),
         )
     return {"id": alignment_id, "job_id": job_id, **summary, "variants": result.variants,
             "reference_start": result.reference_start, "reference_end": result.reference_end,
             "wraps_origin": result.wraps_origin}
+
+
+@app.get("/api/sequence-revisions/{revision_id}/sanger-reads")
+def list_sanger_reads(revision_id: str) -> list[dict[str, object]]:
+    with connect() as connection:
+        if not connection.execute("SELECT id FROM sequence_revisions WHERE id = ?", (revision_id,)).fetchone():
+            raise HTTPException(status_code=404, detail="Sequence revision not found")
+        rows = connection.execute(
+            """SELECT r.id, r.original_filename, r.length_bp, r.direction,
+                      r.quality_summary_json, r.created_at,
+                      a.id AS alignment_id, a.identity_fraction, a.reference_start,
+                      a.reference_end, a.wraps_origin, a.variants_json, a.evidence_json
+               FROM sequencing_reads r LEFT JOIN sanger_alignments a
+               ON a.sequencing_read_id = r.id AND a.sequence_revision_id = r.sequence_revision_id
+               WHERE r.sequence_revision_id = ? ORDER BY r.created_at DESC""", (revision_id,)
+        ).fetchall()
+    output = []
+    for row in rows:
+        item = dict(row)
+        for field, default in (("quality_summary", {}), ("variants", []), ("evidence", {})):
+            raw = item.pop(field + "_json")
+            item[field] = json.loads(raw) if raw else default
+        if item["alignment_id"] and not item["evidence"]:
+            item["evidence"] = {"scope": "legacy_local_alignment", "review_flags": ["legacy_evidence_unavailable"], "whole_reference_verified": False}
+        output.append(item)
+    return output
