@@ -1,12 +1,14 @@
 """Conservative union of saved alignment coordinates; no consensus or QC verdict."""
+from __future__ import annotations
 from collections import Counter, defaultdict
 from hashlib import sha256
 import json
+from .sanger_quality_summary import summarize_quality
 
 METHOD = 'latest_unambiguous_alignment_union_v1'
 
 
-def summarize_sanger_reads(reference: dict, records: list[dict]) -> dict:
+def summarize_sanger_reads(reference: dict, records: list[dict], reference_sequence: str | None = None) -> dict:
     length = reference['length_bp']
     if type(length) is not int or length < 1:
         raise ValueError('Reference must have a positive integer length')
@@ -92,5 +94,7 @@ def summarize_sanger_reads(reference: dict, records: list[dict]) -> dict:
              'source_runs':sources,'whole_reference_verified':False,
              'quality_screening':'not_applied_to_union','conflict_analysis':'not_evaluated',
              'source_files_rechecked':False}
+    payload['quality_review']=summarize_quality(reference,reference_sequence,records,sources)
+    payload['conflict_analysis']=payload['quality_review']['assessment']
     payload['snapshot_sha256']=sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     return payload

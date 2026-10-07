@@ -214,8 +214,8 @@ origin. Reanalysis history never increases read depth.
 
 This is geometric alignment coverage, **not quality-screened coverage or a
 consensus**. Low-quality, ambiguous and differing calls may contribute aligned
-positions; their saved warnings remain visible. Conflicts are not yet evaluated,
-and even 100% coverage does not mean whole-plasmid verification. Ambiguous
+positions; their saved warnings remain visible. The separate quality panel reviews Q20 paired-base conflicts;
+even 100% geometric coverage does not mean whole-plasmid verification. Ambiguous
 placements, truncated searches, missing/mismatched input hashes, unsupported
 reports and invalid intervals are excluded. Duplicate source hashes exclude all
 copies. Original files are not rechecked when viewing the summary.
@@ -245,5 +245,29 @@ from optional end trimming and does not remove calls from saved evidence.
 Historical v2/v3 reports remain unchanged and show that the mapping was not
 recorded. JSON and standalone HTML's saved-evidence section retain the new
 mapping, including aligned bases, which can encompass the entire input. The
-combined-read panel remains geometric coverage; quality-aware multi-read
-conflict review is the next step, not a completed validation or consensus feature.
+combined-read panel retains geometric coverage alongside a separate Q20 paired-base
+conflict review. Neither produces a consensus or whole-plasmid validation verdict.
+
+## Review quality-filtered coverage and disagreements
+
+The revision summary now adds `quality_review`, computed from the same database
+snapshot as the read cards. Only mappings that pass the existing placement and
+provenance filters are considered. The reference sequence hash, mapping version,
+block lengths, original coordinates/direction, paired bases, saved quality values
+when available, covered intervals and derived statistics must agree. A malformed
+mapping is excluded in full. Older reports without a mapping remain explicitly
+unassessed; they can still contribute geometric coverage.
+
+The Q20 panel separately displays positions supported by unambiguous high-quality
+calls, positions with at least two such calls, non-reference positions and
+conflicting positions. Two different Q20+ alleles at the same reference position
+are a conflict. Reads agreeing on an alternate allele are non-reference evidence,
+not a conflict between reads. Low-quality/N calls do not establish agreement.
+Each listed call retains its read/run identity, Phred and original AB1 coordinate;
+its button opens that original chromatogram peak, including reverse-read positions.
+
+This is a paired-base review, not variant normalization or consensus generation.
+Insertion/deletion conflicts are **not evaluated**. Zero observed conflicts does
+not assess missing, excluded or low-quality evidence. Original files are not
+reopened for the summary; legacy stored quality arrays may be absent, in which
+case the saved per-base analysis evidence remains the quality source.

@@ -45,6 +45,15 @@
       if (slot.isConnected && requests.get(slot) === token) slot.removeAttribute('aria-busy');
     }
   }
+  document.getElementById('sanger-summary').addEventListener('click', async event => {
+    const button=event.target.closest('[data-quality-read]');
+    if(!button)return;
+    const card=Array.from(document.querySelectorAll('#sanger-reads .read-card')).find(c=>c.dataset.readId===button.dataset.qualityRead);
+    const position=Number(button.dataset.qualityPosition);
+    if(!card||!Number.isInteger(position)||position<0)return;
+    await load(card,Math.max(0,position-12),position);
+    if(card.isConnected)card.querySelector('.trace-view').scrollIntoView({block:'start'});
+  });
   document.getElementById('sanger-reads').addEventListener('click', event => {
     const button = event.target.closest('[data-trace-open], [data-trace-position], [data-trace-start], [data-trace-go]');
     if (!button || button.disabled) return;

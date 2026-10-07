@@ -726,24 +726,29 @@ def create_sanger_verification(request: SangerVerificationInput) -> dict[str, ob
 def list_sanger_reads(revision_id: str, include_summary: bool = False) -> list[dict[str, object]] | dict:
     with connect() as connection:
         connection.execute("BEGIN")
-        reference = connection.execute("SELECT id,length(sequence_text) AS length_bp,sequence_sha256 AS sha256,topology FROM sequence_revisions WHERE id = ?", (revision_id,)).fetchone()
+        reference = connection.execute("SELECT id,sequence_text,length(sequence_text) AS length_bp,sequence_sha256 AS sha256,topology FROM sequence_revisions WHERE id = ?", (revision_id,)).fetchone()
         if not reference:
             raise HTTPException(status_code=404, detail="Sequence revision not found")
-        rows = connection.execute("SELECT id, original_filename, length_bp, direction, file_sha256, quality_summary_json, created_at FROM sequencing_reads WHERE sequence_revision_id = ? ORDER BY created_at DESC,id", (revision_id,)).fetchall()
+        rows = connection.execute("SELECT id, original_filename, length_bp, direction, file_sha256, base_sequence, qualities_json, quality_summary_json, created_at FROM sequencing_reads WHERE sequence_revision_id = ? ORDER BY created_at DESC,id", (revision_id,)).fetchall()
         output, records = [], []
         for row in rows:
             item = dict(row)
             item.pop("file_sha256")
+            item.pop("base_sequence")
+            item.pop("qualities_json")
             item["quality_summary"] = json.loads(item.pop("quality_summary_json"))
             latest = connection.execute("SELECT r.*, j.input_manifest_json FROM sanger_analysis_runs r JOIN analysis_jobs j ON j.id=r.analysis_job_id WHERE r.sequencing_read_id = ? ORDER BY r.run_number DESC LIMIT 1", (row["id"],)).fetchone()
             item.update(_analysis_report(latest) if latest else {"alignment_id":None,"variants":[],"evidence":{}})
             records.append({"id":row["id"],"original_filename":row["original_filename"],"file_sha256":row["file_sha256"],
                             "alignment_id":latest["id"] if latest else None,"run_number":latest["run_number"] if latest else None,
+                            "base_sequence":row["base_sequence"],"qualities":json.loads(row["qualities_json"]),
                             "manifest":json.loads(latest["input_manifest_json"]) if latest else {},
                             "report":json.loads(latest["report_json"]) if latest else {}})
             output.append(item)
     if include_summary:
-        return {"reads":output,"summary":summarize_sanger_reads(dict(reference),records)}
+        metadata=dict(reference)
+        sequence=metadata.pop("sequence_text")
+        return {"reads":output,"summary":summarize_sanger_reads(metadata,records,sequence)}
     return output
 
 
