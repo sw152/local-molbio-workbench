@@ -73,7 +73,7 @@
   }
   function resetConstruct() {
     mapVersion++;primerVersion++;mapController?.abort();revision=null;primerBusy=false;
-    window.fastqInputs.clear();window.inputJobs.clear();window.sangerView.clear();window.sequenceMap.clear();window.primerReview.clear();
+    window.alignmentJobs.clear();window.fastqInputs.clear();window.inputJobs.clear();window.sangerView.clear();window.sequenceMap.clear();window.primerReview.clear();
     $('#primer-results').replaceChildren();$('#primer-status').textContent='';$('#primer-design-summary').textContent='';$('#primer-form [name=target_start]').value='';$('#primer-form [name=target_end]').value='';
     $('#map-title').textContent='Loading construct…';$('#map-summary').textContent='';
     primerControls();
@@ -91,7 +91,7 @@
       $('#map-summary').textContent=`${Number(m.length_bp).toLocaleString()} bp · ${m.topology} · ${m.feature_count} annotated features`;
       $('#map-message').textContent=m.requires_annotation_review?`Annotation review required · ${m.parse_warning_count} parser warning(s) retained.`:'Annotation coordinates parsed without warnings.';
       $('#map-message').className=m.requires_annotation_review?'alert warning':'alert';
-      window.sequenceMap.render(m);window.sangerView.open(revision,m.length_bp);window.inputJobs.open(revision);window.fastqInputs.open(revision);primerControls();
+      window.sequenceMap.render(m);window.sangerView.open(revision,m.length_bp);window.inputJobs.open(revision);window.fastqInputs.open(revision);window.alignmentJobs.open(revision);primerControls();
       await primers(revision,version);
     } catch(error) {
       if(version!==mapVersion||error.name==='AbortError')return;

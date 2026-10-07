@@ -55,7 +55,7 @@
       offset=data.offset;total=data.total;hasMore=data.has_more;
       $('#fq-list').innerHTML=data.items.length?data.items.map(card).join(''):'<div class="fq-empty">No FASTQ inputs attached.<br><small>Register a file to inspect read lengths and base quality.</small></div>';
       $('#fq-page').textContent=total?`${offset+1}–${offset+data.items.length} of ${number(total)} files`:'0 files';
-      status(message||'Registered input summaries. No alignment or consensus has been performed.');
+      status(message||'Registered input summaries only. See FASTQ alignment below for task evidence; registration does not perform alignment or consensus.');
     }catch(error){if(version===generation)status(`Could not refresh inputs: ${error.message} Use Refresh to retry. Displayed summaries may be out of date.`,true);}
     finally{if(version===generation){busy=false;controls();}}
   }

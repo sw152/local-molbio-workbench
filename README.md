@@ -393,4 +393,4 @@ bounded original inputs, preserves file/record ordinals, and rechecks identity
 before fenced publication. Diagnostic files alone do not imply a successful job.
 See [registered FASTQ alignment commands and limits](docs/registered-fastq-alignment.zh-CN.md).
 
-Revision-scoped [alignment job and evidence APIs](docs/alignment-api.zh-CN.md) expose bounded, registered FASTQ local alignments with read provenance and paginated attempts. The worker runs explicitly; alignment review UI, consensus and whole-plasmid verification are still pending.
+Revision-scoped [alignment job and evidence APIs](docs/alignment-api.zh-CN.md) expose bounded, registered FASTQ local alignments with read provenance and paginated attempts. The worker runs explicitly. The [alignment review UI](docs/alignment-ui.zh-CN.md) supports submission, cancellation, paginated attempts and read evidence with strand/origin-aware tracks. Consensus and whole-plasmid verification remain pending.

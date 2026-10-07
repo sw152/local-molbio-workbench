@@ -1,6 +1,6 @@
 # 已登记 FASTQ 的有界比对任务
 
-`registered-fastq-minimap2-v1` 将原始 FASTQ 登记、独立输入快照、真实 minimap2 和持久化队列连接起来。目前提供 Python 接口、CLI 和 [修订范围内分页 API](alignment-api.zh-CN.md)，没有比对提交/结果审阅界面。成功表示产生了已校验的局部比对证据，不是生成了共识、变异报告或整质粒通过结论。
+`registered-fastq-minimap2-v1` 将原始 FASTQ 登记、独立输入快照、真实 minimap2 和持久化队列连接起来。目前提供 Python 接口、CLI 和 [修订范围内分页 API](alignment-api.zh-CN.md)，并已连接 [局部比对审阅界面](alignment-ui.zh-CN.md)。成功表示产生了已校验的局部比对证据，不是生成了共识、变异报告或整质粒通过结论。
 
 ## 运行
 

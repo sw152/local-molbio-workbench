@@ -1,6 +1,6 @@
 # 修订范围内的局部比对任务 API
 
-此接口连接已登记 FASTQ、有界 minimap2 worker 与可分页的结果审阅。尚未提供比对提交/审阅 UI；调用提交接口不会启动 worker，仍需显式运行 `python -m localmolbio.worker once --adapter alignment`。应用与 worker 使用同一数据目录和固定的 MOLBIO_MINIMAP2 配置，部署、类型和规模边界见 [登记 FASTQ 比对任务](registered-fastq-alignment.zh-CN.md)。
+此接口连接已登记 FASTQ、有界 minimap2 worker 与可分页的结果审阅。已连接 [比对提交/审阅 UI](alignment-ui.zh-CN.md)；调用提交接口不会启动 worker，仍需显式运行 `python -m localmolbio.worker once --adapter alignment`。应用与 worker 使用同一数据目录和固定的 MOLBIO_MINIMAP2 配置，部署、类型和规模边界见 [登记 FASTQ 比对任务](registered-fastq-alignment.zh-CN.md)。
 
 ## 路由与请求
 
