@@ -1,6 +1,6 @@
 # 已登记 FASTQ 的有界比对任务
 
-`registered-fastq-minimap2-v1` 将原始 FASTQ 登记、独立输入快照、真实 minimap2 和持久化队列连接起来。目前提供 Python 接口和 CLI，没有比对提交/结果审阅界面。成功表示产生了已校验的局部比对证据，不是生成了共识、变异报告或整质粒通过结论。
+`registered-fastq-minimap2-v1` 将原始 FASTQ 登记、独立输入快照、真实 minimap2 和持久化队列连接起来。目前提供 Python 接口、CLI 和 [修订范围内分页 API](alignment-api.zh-CN.md)，没有比对提交/结果审阅界面。成功表示产生了已校验的局部比对证据，不是生成了共识、变异报告或整质粒通过结论。
 
 ## 运行
 
@@ -34,7 +34,7 @@ attempt-result.json 仅为诊断产物，可能在最终提交前丢失租约；
 
 科学/输入不一致和工具进程失败为终止性错误；一般输入/产物 I/O 错误在预算内重试，等待下一次显式 once。未知异常记为 unexpected_alignment_error，避免将异常中的文件路径或序列写入通用任务错误。任务成功设置 analysis_performed=true，scope=registered_fastq_local_alignments_only；consensus_performed、whole_reference_verified 仍为 false。
 
-完整结果包含各读段局部匹配、工具与参数来源及快照索引。当前直接保存有界 JSON 结果，尚无分页比对 API、覆盖/差异报告、共识或大规模性能承诺。圆形副本、非穷举多重匹配、MAPQ、N 与 gap 分母等边界沿用 [核心语义](alignment-evidence-core.zh-CN.md)。后续科学算法变更需更新适配器/schema 版本，不能静默改写历史结果。
+完整结果包含各读段局部匹配、工具与参数来源及快照索引。当前直接保存有界 JSON 结果，分页 API 读取已提交结果，但尚无覆盖/差异报告、共识或大规模性能承诺。圆形副本、非穷举多重匹配、MAPQ、N 与 gap 分母等边界沿用 [核心语义](alignment-evidence-core.zh-CN.md)。后续科学算法变更需更新适配器/schema 版本，不能静默改写历史结果。
 
 ## 验收
 

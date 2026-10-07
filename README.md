@@ -392,3 +392,5 @@ trusted pinned tool with `MOLBIO_MINIMAP2`. Each attempt copies and validates
 bounded original inputs, preserves file/record ordinals, and rechecks identity
 before fenced publication. Diagnostic files alone do not imply a successful job.
 See [registered FASTQ alignment commands and limits](docs/registered-fastq-alignment.zh-CN.md).
+
+Revision-scoped [alignment job and evidence APIs](docs/alignment-api.zh-CN.md) expose bounded, registered FASTQ local alignments with read provenance and paginated attempts. The worker runs explicitly; alignment review UI, consensus and whole-plasmid verification are still pending.
