@@ -39,7 +39,7 @@ def inspect_environment(directory, binary=None):
     return {'ready':all(c['ready'] for c in checks),'data_directory':str(target),
             'database_exists':(target/'workbench.sqlite3').is_file(),
             'free_bytes':shutil.disk_usage(ancestor).free,'checks':checks,'alignment':tool,
-            'execution':'foreground only; server does not start workers'}
+            'execution':'foreground only; workers require explicit serve opt-in'}
 
 
 def positive(value):
@@ -67,6 +67,7 @@ def main(argv=None):
     doctor.add_argument('--require-alignment',action='store_true',help='Return failure unless the pinned aligner is usable')
     serve=sub.add_parser('serve',help='Run the UI/API on loopback in the foreground; no workers start automatically')
     serve.add_argument('--port',type=port_number,default=8000)
+    serve.add_argument('--with-alignment-worker',action='store_true',help='While the server is open, execute queued FASTQ alignments from this data directory; stop after first failure')
     work=sub.add_parser('work',help='Execute up to a finite number of queued tasks, stopping at idle or first failure')
     work.add_argument('--adapter',choices=('ab1','fastq','alignment'),required=True,
                       help='ab1/fastq only check registered input identity; alignment runs local FASTQ alignment')
@@ -76,7 +77,7 @@ def main(argv=None):
     try:check=inspect_environment(args.data_dir,args.minimap2)
     except OSError:
         emit({'status':'rejected','error':'storage_unavailable','next':'Check the selected data path and its parent permissions.'});return 2
-    needs_alignment=(args.command=='doctor' and args.require_alignment) or (args.command=='work' and args.adapter=='alignment')
+    needs_alignment=(args.command=='doctor' and args.require_alignment) or (args.command=='work' and args.adapter=='alignment') or (args.command=='serve' and args.with_alignment_worker)
     if args.command=='doctor':
         emit(check);return 0 if check['ready'] and (not needs_alignment or check['alignment']['ready']) else 2
     if not check['ready'] or (needs_alignment and not check['alignment']['ready']):
@@ -106,10 +107,23 @@ def main(argv=None):
         import uvicorn
         emit({'status':'starting','url':f'http://127.0.0.1:{args.port}',
               'data_directory':check['data_directory'],'alignment_ready':check['alignment']['ready'],
-              'worker':'not_started; use the explicit work command for queued tasks'})
-        server=uvicorn.Server(uvicorn.Config('localmolbio.api:app',host='127.0.0.1',port=args.port))
-        server.run(sockets=[sock])
-        return 0 if server.started else 1
+              'worker':'managed_alignment_opt_in' if args.with_alignment_worker else 'not_started; use the explicit work command for queued tasks'})
+        from .api import app
+        runner=None
+        try:
+            if args.with_alignment_worker:
+                from .managed_worker import ManagedAlignmentWorker
+                runner=ManagedAlignmentWorker(check['data_directory'])
+                runner.acquire()
+            app.state.alignment_runner=runner
+            server=uvicorn.Server(uvicorn.Config(app,host='127.0.0.1',port=args.port))
+            server.run(sockets=[sock])
+            return 0 if server.started else 1
+        except RuntimeError as exc:
+            emit({'status':'rejected','error':str(exc)});return 2
+        finally:
+            if runner is not None:runner.release()
+            app.state.alignment_runner=None
 
 
 if __name__=='__main__':

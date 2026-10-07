@@ -9,7 +9,7 @@ from . import job_queue, fastq_validation, fastq_alignment
 from .input_validation import ADAPTER, InputValidationError, enqueue_check, validate_inputs
 
 
-def run_once(worker_id, lease_seconds=60, adapter=ADAPTER):
+def run_once(worker_id, lease_seconds=60, adapter=ADAPTER, on_claim=lambda: None, on_pulse=lambda: None):
     if adapter not in (ADAPTER, fastq_validation.ADAPTER, fastq_alignment.ADAPTER):
         raise ValueError('Unsupported worker adapter')
     validator = {ADAPTER: validate_inputs, fastq_validation.ADAPTER: fastq_validation.validate_inputs,
@@ -19,8 +19,14 @@ def run_once(worker_id, lease_seconds=60, adapter=ADAPTER):
         return {'status': 'idle'}
     job, token = claim['job_id'], claim['lease_token']
     response = {'job_id': job, 'attempt': claim['attempt']}
+    def pulse():
+        on_pulse()
+        job_queue.renew(job, token, lease_seconds)
     try:
-        result = validator(claim, lambda: job_queue.renew(job, token, lease_seconds))
+        on_claim()
+        pulse()
+        result = validator(claim, pulse)
+        pulse()
         job_queue.finish(job, token, result)
         return {**response, 'status': 'succeeded', 'scope': result['scope'], 'analysis_performed': result.get('analysis_performed', False)}
     except job_queue.QueueConflict:

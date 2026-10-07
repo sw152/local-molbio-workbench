@@ -66,10 +66,17 @@ def _utc_now() -> str:
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(application: FastAPI):
     initialise()
     ensure_initial_revisions()
-    yield
+    runner = getattr(application.state, "alignment_runner", None)
+    if runner is not None:runner.start()
+    try:
+        yield
+    finally:
+        if runner is not None:
+            import asyncio
+            await asyncio.to_thread(runner.stop)
 
 
 app = FastAPI(
@@ -94,6 +101,13 @@ def index() -> Path:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/runtime")
+def runtime_status():
+    runner = getattr(app.state, "alignment_runner", None)
+    return {"alignment_worker":runner.status() if runner is not None else
+            {"enabled":False,"state":"disabled","completed_tasks":0,"adapter":"alignment"}}
 
 
 @app.get("/api/imports")

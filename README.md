@@ -17,7 +17,7 @@ molbio doctor
 molbio serve --port 8000
 ```
 
-Replace the data path with your chosen storage location, then open `http://127.0.0.1:8000`. The new entry point requires an explicit data directory and starts no workers automatically. Existing direct uvicorn commands retain their previous `./var` default. See [setup, diagnostics and bounded task execution](docs/local-entrypoint.zh-CN.md). For development, install `-e ".[dev]"` instead.
+Replace the data path with your chosen storage location, then open `http://127.0.0.1:8000`. The new entry point requires an explicit data directory. Default `serve` starts no workers; opt into [foreground FASTQ analysis mode](docs/foreground-analysis.zh-CN.md) with `--with-alignment-worker` to execute queued alignments while the service is open. Existing direct uvicorn commands retain their previous `./var` default. See [setup, diagnostics and bounded task execution](docs/local-entrypoint.zh-CN.md). For development, install `-e ".[dev]"` instead.
 
 ## Workstation deployment
 

@@ -6,7 +6,7 @@
 
 1. 在上方登记 FASTQ / FASTQ.gz，并声明质量编码。点击 Refresh alignment tasks 同步新增登记文件。
 2. 选择本修订的文件（每页 5 个，跨页保留选择，最多 100 个）；显式选择 ONT noisy / ONT high accuracy / PacBio HiFi / unpaired short reads。类型没有默认值，不根据文件名自动推断。
-3. Queue alignment 创建任务。提交不会启动后台 worker；需由本机配置好的 `python -m localmolbio.worker once --adapter alignment` 执行。网页不会接收或执行任意命令/二进制路径。
+3. Queue alignment 创建任务。提交只排队；如已显式开启 [前台分析模式](foreground-analysis.zh-CN.md)，会由托管进程串行执行，否则需由本机配置好的 `python -m localmolbio.worker once --adapter alignment` 执行。网页不会接收或执行任意命令/二进制路径。
 4. Refresh alignment tasks 更新状态，Review alignment 打开尝试和结果。queued/running 可以取消；取消后的迟到 worker 不能发布结果。无自动轮询或隐含重试。
 
 任务、尝试和读段结果每页 3 项。任务列表按新到旧，尝试按序号降序；读段按本次 qN 查询顺序（文件 ID 排序、文件内顺序）展示。每个记录都有原文件名、登记 input_id、1 基文件内记录序号和大写序列哈希，重复 FASTQ 标题不会合并记录。摘要中的文件名仅为标签，哈希和 ID 保留内容身份。
@@ -38,3 +38,5 @@
 覆盖总览的 Inspect related reads 打开该区间的关联记录，分别查看配对与删除证据，翻页和刷新保留条件；可返回总览或清除筛选。全部候选及原始来源保留，失败时不让新条件套用旧结果。详见 [区间审阅边界](alignment-coverage.zh-CN.md#从区间进入原始记录)。
 
 成功任务现在可下载 [HTML/JSON 审阅报告](alignment-report.zh-CN.md)，始终包含整项任务的全部读段和待复核区间，独立于当前分页/筛选。失败保留审阅证据，切换修订后迟到响应不触发下载。
+
+Local analysis mode 展示本服务的只读执行状态，刷新失败明确显示不可用；开启/失败/退出规则详见 [前台分析模式](foreground-analysis.zh-CN.md)。
