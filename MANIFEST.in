@@ -9,3 +9,6 @@ include scripts/verify_fastq_ui.py
 include scripts/verify_alignment_ui.py
 
 include scripts/verify_managed_worker_ui.py
+
+include scripts/build_validation_pack.py
+include scripts/verify_validation_pack_ui.py
