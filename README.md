@@ -374,3 +374,13 @@ original-byte hash/size, compression, declared encoding and saved summary digest
 Default worker invocations still claim AB1 checks only. No FASTQ alignment or
 consensus is performed, and the saved summary is not recomputed. See
 [FASTQ worker usage and limits](docs/fastq-worker.zh-CN.md).
+
+## Bounded alignment evidence core
+
+An internal minimap2 2.31 core now produces and independently validates local
+base-level alignment evidence for explicit long-read or single-end short-read
+presets. Linear/reverse/circular coordinates, duplicate circular copies and
+ambiguous-base identity denominators have synthetic truth tests using the actual
+aligner. This core is not yet connected to registered FASTQ jobs or the UI; it
+has strict size limits and does not generate consensus or a plasmid pass verdict.
+See [tool setup, evidence semantics and limits](docs/alignment-evidence-core.zh-CN.md).
