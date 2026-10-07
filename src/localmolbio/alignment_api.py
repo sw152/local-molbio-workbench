@@ -203,3 +203,24 @@ def coverage(revision_id: str, job_id: str,
             'reference_sha256':evidence['reference_sha256'],'summary':summary,
             'regions':{**_page([{'start':a,'end':b,'length_bp':b-a} for a,b in intervals[offset:offset+limit]],
                               len(intervals),limit,offset),'kind':kind}}
+
+
+@router.get('/{job_id}/report')
+def export_report(revision_id: str, job_id: str, format: Literal['json','html']='json'):
+    from fastapi.responses import Response
+    from .alignment_report import build_report, render_html
+    with closing(connect()) as db:
+        db.execute('BEGIN');row = _job(db,revision_id,job_id);evidence = _published(row)
+        _validate_sources(evidence)
+        labels = {r['id']:r['original_filename'] for r in db.execute(
+            'SELECT id,original_filename FROM fastq_inputs WHERE sequence_revision_id=?',(revision_id,))}
+        try:
+            payload = build_report(row,evidence,labels)
+            content = json.dumps(payload,ensure_ascii=False,indent=2,allow_nan=False) if format=='json' else render_html(payload)
+        except (KeyError,TypeError,ValueError,IndexError) as exc:
+            raise HTTPException(409,'alignment_report_evidence_invalid') from exc
+    safe_id = ''.join(c for c in job_id if c.isascii() and (c.isalnum() or c=='-'))[:80]
+    return Response(content,media_type='application/json' if format=='json' else 'text/html',
+                    headers={'Content-Disposition':f'attachment; filename="alignment-{safe_id}.{format}"',
+                             'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
+                             'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"})

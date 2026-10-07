@@ -12,6 +12,7 @@
 | GET 空后缀 | 分页任务列表，默认 limit=5、offset=0，按创建时间和 ID 降序 |
 | GET /{job_id} | 身份清单、当前文件名标签、结果摘要、分页尝试历史（默认 5 条，尝试序号降序） |
 | GET /{job_id}/reads | 已正式发布的逐读段证据，可按参考区间/关系过滤，默认 20 条，按原查询索引升序 |
+| GET /{job_id}/report | 全任务 HTML/JSON 离线审阅报告，只允许已发布结果 |
 | POST /{job_id}/cancel | 取消 queued/running；重复取消返回相同状态；已成功/失败返回 409 |
 
 提交 JSON 必须显式给出：
@@ -50,3 +51,5 @@ sources_sha256 是 worker 验证过的原始 sources.json **字节**哈希。数
 11 项 API 专项测试在 M2 配置真实固定 minimap2，覆盖普通/gzip 多文件、重复标题、正反向精确坐标、未报告命中、来源映射、任务/尝试/读段分页、幂等冲突、跨修订/适配器隔离、严格参数、凭证与路径不公开、取消后禁止发布和损坏来源/版本拒绝。没有实际仪器输入或大规模性能结论。
 
 区间筛选的 start/end/relation、先筛选后分页和 region_evidence 语义见 [区间进入原始记录](alignment-coverage.zh-CN.md#从区间进入原始记录)。不筛选时原读段字段不变，响应增加 region=null 与 unfiltered_total。
+
+完整任务导出及安全/科学边界见 [局部比对审阅报告](alignment-report.zh-CN.md)。

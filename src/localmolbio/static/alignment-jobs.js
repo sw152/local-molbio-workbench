@@ -45,7 +45,7 @@
   }
   function detailHTML(d){
     const result=d.result;
-    return `<header><h4>Alignment review</h4><button data-aj-close ${busy?'disabled':''}>Close alignment review</button></header><p><code>${esc(d.id)}</code> · ${esc(labels[d.status])}</p><p class="ij-note">${esc(types[d.data_type])} · ${esc(d.tool.name)} ${esc(d.tool.version)}</p><details><summary>Reference &amp; input identities</summary><p>Reference SHA-256 <code>${esc(d.reference.sequence_sha256)}</code></p>${d.input_identities.map(i=>`<p><b>${esc(d.input_labels[i.id]||i.id)}</b><br>Original SHA-256 <code>${esc(i.sha256)}</code></p>`).join('')}<p>Tool SHA-256 <code>${esc(d.tool.binary_sha256)}</code></p></details><h4 class="aj-subhead">Attempt history</h4>${d.attempts.items.length?`<ol>${d.attempts.items.map(a=>`<li><b>Attempt ${a.number} · ${esc(a.status)}</b><span>${esc(a.started_at)}</span>${a.error_detail?`<small class="ij-error">${esc(a.error_detail.replaceAll('_',' '))}</small>`:''}</li>`).join('')}</ol>`:'<p class="ij-note">No worker has claimed this task.</p>'}${pager('attempts',d.attempts,3,'Newer attempts','Older attempts')}${result?`<div class="aj-boundary"><b>Local alignments · ${n(result.read_count)} reads</b><p>Base quality and pairing were not used. No consensus or whole-plasmid verification. A single reported match does not establish uniqueness.</p></div>${coverageHTML(state.coverage)}${regionFilterHTML()}<div class="aj-read-list">${state.reads?.items.map(readHTML).join('')||''}</div>${state.reads?pager('reads',state.reads,3,'Previous reads','Next reads'):''}`:'<p class="ij-note">Read evidence appears only after the worker publishes a successful result. Refresh alignment tasks to update.</p>'}`;
+    return `<header><h4>Alignment review</h4><button data-aj-close ${busy?'disabled':''}>Close alignment review</button></header><p><code>${esc(d.id)}</code> · ${esc(labels[d.status])}</p><p class="ij-note">${esc(types[d.data_type])} · ${esc(d.tool.name)} ${esc(d.tool.version)}</p><details><summary>Reference &amp; input identities</summary><p>Reference SHA-256 <code>${esc(d.reference.sequence_sha256)}</code></p>${d.input_identities.map(i=>`<p><b>${esc(d.input_labels[i.id]||i.id)}</b><br>Original SHA-256 <code>${esc(i.sha256)}</code></p>`).join('')}<p>Tool SHA-256 <code>${esc(d.tool.binary_sha256)}</code></p></details><h4 class="aj-subhead">Attempt history</h4>${d.attempts.items.length?`<ol>${d.attempts.items.map(a=>`<li><b>Attempt ${a.number} · ${esc(a.status)}</b><span>${esc(a.started_at)}</span>${a.error_detail?`<small class="ij-error">${esc(a.error_detail.replaceAll('_',' '))}</small>`:''}</li>`).join('')}</ol>`:'<p class="ij-note">No worker has claimed this task.</p>'}${pager('attempts',d.attempts,3,'Newer attempts','Older attempts')}${result?`<div class="aj-boundary"><b>Local alignments · ${n(result.read_count)} reads</b><p>Base quality and pairing were not used. No consensus or whole-plasmid verification. A single reported match does not establish uniqueness.</p></div><section class="aj-export"><h4>Save this review</h4><p class="ij-note">Exports all task records and review regions, regardless of the current page or filter. Includes file labels and hashes; original sequences and files are excluded.</p><button data-aj-export="html" ${busy?'disabled':''}>Download HTML report</button><button data-aj-export="json" ${busy?'disabled':''}>Download JSON evidence</button></section>${coverageHTML(state.coverage)}${regionFilterHTML()}<div class="aj-read-list">${state.reads?.items.map(readHTML).join('')||''}</div>${state.reads?pager('reads',state.reads,3,'Previous reads','Next reads'):''}`:'<p class="ij-note">Read evidence appears only after the worker publishes a successful result. Refresh alignment tasks to update.</p>'}`;
   }
   function render(){
     if(!state){root.replaceChildren();return;}
@@ -81,6 +81,17 @@
   });
   root.addEventListener('click',event=>{
     const b=event.target.closest('button');if(!b||b.disabled||busy||!state)return;
+    if(b.hasAttribute('data-aj-export')){
+      const format=b.dataset.ajExport,id=state.detail.id,url=`${base()}/alignments/${encodeURIComponent(id)}/report?format=${format}`;
+      action(async token=>{
+        const response=await fetch(url);
+        if(!response.ok){let problem;try{problem=await response.json();}catch{}throw new Error(typeof problem?.detail==='string'?problem.detail.replaceAll('_',' '):`Export rejected (${response.status}).`);}
+        const blob=await response.blob();if(token!==generation)return;
+        const objectURL=URL.createObjectURL(blob),a=document.createElement('a');
+        a.href=objectURL;a.download=`alignment-${id}.${format}`;a.click();setTimeout(()=>URL.revokeObjectURL(objectURL),1000);
+        state.message='Complete task report downloaded. Original files were not rechecked at export.';
+      });return;
+    }
     if(b.hasAttribute('data-aj-close')){state.detail=null;state.reads=null;state.coverage=null;render();return;}
     if(b.dataset.ajDetail){action(t=>detail(t,b.dataset.ajDetail,0,0,'unpaired',0,null));return;}
     if(b.hasAttribute('data-aj-overview')){root.querySelector('.aj-coverage')?.scrollIntoView({block:'start'});return;}

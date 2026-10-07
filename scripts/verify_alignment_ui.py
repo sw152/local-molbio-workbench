@@ -84,6 +84,36 @@ try:
         expect(panel.locator('.aj-read')).to_contain_text('Record 8')
         expect(focused).to_contain_text('Reference [239, 245)')
         expect(panel.locator('#aj-relation')).to_have_value('either')
+        # Export from a filtered second page still includes every record and all regions.
+        with page.expect_download() as download:
+            panel.locator('[data-aj-export="json"]').click()
+        json_path=artifacts/'alignment-report.json';download.value.save_as(str(json_path))
+        exported=json.loads(json_path.read_text());assert len(exported['reads'])==8
+        assert exported['selection']=='all_task_records' and exported['review_regions']['deletion']==[[239,245]]
+        assert exported['reads'][5]['withheld'] and not exported['evidence']['whole_reference_verified']
+        with page.expect_download() as download:
+            panel.locator('[data-aj-export="html"]').click()
+        html_path=artifacts/'alignment-report.html';download.value.save_as(str(html_path))
+        report_page=browser.new_page(viewport={'width':1440,'height':1080})
+        external=[];report_page.on('request',lambda req:external.append(req.url) if req.url.startswith(('http:','https:')) else None)
+        report_page.goto(html_path.as_uri());expect(report_page.locator('.record')).to_have_count(8)
+        expect(report_page.get_by_role('heading',name='Local alignment review',exact=True)).to_be_visible()
+        expect(report_page.locator('header')).to_contain_text('No whole-plasmid verdict')
+        report_page.screenshot(path=str(artifacts/'alignment-report-desktop.png'))
+        report_page.locator('.record').nth(4).scroll_into_view_if_needed()
+        expect(report_page.locator('.record').nth(4)).to_contain_text('6 deleted')
+        report_page.screenshot(path=str(artifacts/'alignment-report-deletion.png'))
+        report_page.set_viewport_size({'width':390,'height':844});report_page.evaluate('window.scrollTo(0,0)')
+        report_page.screenshot(path=str(artifacts/'alignment-report-mobile.png'))
+        assert report_page.locator('body').evaluate('(e)=>e.scrollWidth<=window.innerWidth')
+        report_page.emulate_media(media='print');report_page.screenshot(path=str(artifacts/'alignment-report-print.png'))
+        assert not external,external
+        report_page.close()
+        page.route('**/report?*',lambda route:route.fulfill(status=409,json={'detail':'alignment report evidence invalid'}))
+        panel.locator('[data-aj-export="html"]').click();expect(status).to_contain_text('alignment report evidence invalid')
+        expect(focused).to_contain_text('4 matching records / 8 total')
+        expect(panel.locator('.aj-read')).to_contain_text('Record 8')
+        page.unroute('**/report?*')
         panel.locator('[data-aj-reads]').first.click();expect(panel.locator('.aj-read')).to_have_count(3)
         focused.scroll_into_view_if_needed();page.screenshot(path=str(artifacts/'alignment-region-desktop.png'))
         panel.locator('#aj-relation').select_option('deletion')
@@ -150,6 +180,19 @@ try:
         assert page.locator('#map-panel').evaluate('(e)=>e.scrollWidth<=e.clientWidth')
         assert reverse.locator('.aj-diagram').first.evaluate('(e)=>e.scrollWidth>e.clientWidth')
         panel.locator('.aj-read').nth(2).scroll_into_view_if_needed();page.screenshot(path=str(artifacts/'alignment-wrap-mobile.png'))
+        # Do not download a stale report after the review is closed or revision changes.
+        stale_downloads=[];page.on('download',lambda d:stale_downloads.append(d.suggested_filename))
+        page.evaluate('''() => {const real=window.fetch.bind(window);window.delayReport=true;window.fetch=async (url,opts)=>{
+          const r=await real(url,opts);if(window.delayReport && String(url).includes('/report?')){
+            window.delayReport=false;window.reportWaiting=true;
+            return new Promise(resolve=>setTimeout(()=>{window.oldReportDone=true;resolve(r)},1200));}return r;};}''')
+        panel.locator('[data-aj-export="html"]').click();page.wait_for_function('window.reportWaiting')
+        page.locator('#close-map').click();page.locator('.open').nth(1).click();expect(status).to_contain_text('Choose files')
+        page.wait_for_function('window.oldReportDone');expect(panel.locator('.aj-read')).to_have_count(0)
+        assert stale_downloads==[]
+        page.locator('#close-map').click();page.locator('.open').first.click();expect(status).to_contain_text('Choose files')
+        panel.locator('[data-aj-detail]').click();expect(panel.locator('.aj-read')).to_have_count(3)
+        coverage.locator('#aj-region-kind').select_option('deletion');expect(coverage.locator('[data-aj-inspect]')).to_have_count(1)
         # A filtered response that arrives after switching revisions cannot restore old reads.
         page.evaluate('''() => {const real=window.fetch.bind(window);window.delayRegion=true;window.fetch=async (url,opts)=>{
           const r=await real(url,opts);if(window.delayRegion && String(url).includes('/reads?') && String(url).includes('&start=')){
@@ -210,7 +253,7 @@ try:
         panel.scroll_into_view_if_needed();page.screenshot(path=str(artifacts/'alignment-empty-mobile.png'))
         assert not errors,errors
         browser.close()
-    (artifacts/'result.json').write_text(json.dumps({'passed':True,'real_minimap2':True,'synthetic_only':True,'checks':['explicit type','lost response idempotency','real worker','forward/reverse/circular origin evidence','real deletion remains a diagram gap','multi-traversal withheld is distinct from no hit','read/job/input/attempt pagination','cross-page selection','cancel','refresh failure recovery','late detail and submission revision isolation','mobile overflow','coverage composition and overlapping deletion evidence','coverage filter and failure recovery','region read navigation, pagination and original provenance','paired versus deletion filters and refresh persistence','failed filter preserves committed evidence','mobile focused review and return to overview','late filtered response revision isolation'],'screenshots':[p.name for p in artifacts.glob('*.png')]},indent=2))
+    (artifacts/'result.json').write_text(json.dumps({'passed':True,'real_minimap2':True,'synthetic_only':True,'checks':['explicit type','lost response idempotency','real worker','forward/reverse/circular origin evidence','real deletion remains a diagram gap','multi-traversal withheld is distinct from no hit','read/job/input/attempt pagination','cross-page selection','cancel','refresh failure recovery','late detail and submission revision isolation','mobile overflow','coverage composition and overlapping deletion evidence','coverage filter and failure recovery','region read navigation, pagination and original provenance','paired versus deletion filters and refresh persistence','failed filter preserves committed evidence','mobile focused review and return to overview','complete HTML and JSON downloads from filtered page','standalone report desktop/mobile/print and no network assets','report failure preserves evidence','late report does not download after revision switch','late filtered response revision isolation'],'screenshots':[p.name for p in artifacts.glob('*.png')]},indent=2))
     print(json.dumps({'artifacts':str(artifacts),'passed':True}))
 finally:
     server.terminate();server.wait(timeout=10);log.close()
