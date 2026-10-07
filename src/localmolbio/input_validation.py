@@ -61,20 +61,22 @@ def _signature(info):
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
 
-def _hash_registered_file(row, pulse):
+def _hash_managed_file(row, pulse, directory, outside_code, identity_key, expected_size=None):
     path = Path(row['storage_path'])
     try:
         if path.is_symlink():
             raise InputValidationError('symlink_input_rejected')
         resolved = path.resolve(strict=True)
-        if not resolved.is_relative_to(read_dir().resolve()):
-            raise InputValidationError('input_outside_managed_reads')
+        if not resolved.is_relative_to(directory.resolve()):
+            raise InputValidationError(outside_code)
         # NONBLOCK prevents an unexpectedly replaced FIFO from blocking before fstat.
         fd = os.open(resolved, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         try:
             before = os.fstat(fd)
             if not stat.S_ISREG(before.st_mode):
                 raise InputValidationError('input_not_regular_file')
+            if expected_size is not None and before.st_size != expected_size:
+                raise InputValidationError('input_size_mismatch')
             digest = sha256()
             with os.fdopen(fd, 'rb', closefd=False) as stream:
                 while True:
@@ -90,13 +92,17 @@ def _hash_registered_file(row, pulse):
             os.close(fd)
         if digest.hexdigest() != row['file_sha256']:
             raise InputValidationError('input_hash_mismatch')
-        return {'read_id': row['id'], 'sha256': digest.hexdigest(), 'size_bytes': after.st_size}
+        return {identity_key: row['id'], 'sha256': digest.hexdigest(), 'size_bytes': after.st_size}
     except FileNotFoundError as exc:
         raise InputValidationError('input_file_missing') from exc
     except PermissionError as exc:
         raise InputValidationError('input_not_readable') from exc
     except OSError as exc:
         raise InputValidationError('input_io_error', retryable=True) from exc
+
+
+def _hash_registered_file(row, pulse):
+    return _hash_managed_file(row, pulse, read_dir(), 'input_outside_managed_reads', 'read_id')
 
 
 def validate_inputs(claim, pulse):

@@ -365,3 +365,12 @@ computes bounded streaming format, read-length and quality summaries. Uploads
 require an explicit Phred+33 declaration; encoding, paired reads and sequencing
 platform are not inferred. This API does not perform alignment or consensus,
 and the construct view includes FASTQ upload, paginated quality summaries and recoverable error states. The UI requires an explicit Phred+33 declaration; quality bands are disjoint Q<20 / Q20–29 / Q30+ counts. Browser checks: `python scripts/verify_fastq_ui.py`. See [format support, API and limits](docs/fastq-inputs.zh-CN.md).
+
+
+Registered FASTQ inputs also support a separate **identity-only** queue adapter:
+`python -m localmolbio.worker enqueue-fastq-check` and
+`python -m localmolbio.worker once --adapter fastq`. It binds the reference,
+original-byte hash/size, compression, declared encoding and saved summary digest.
+Default worker invocations still claim AB1 checks only. No FASTQ alignment or
+consensus is performed, and the saved summary is not recomputed. See
+[FASTQ worker usage and limits](docs/fastq-worker.zh-CN.md).
