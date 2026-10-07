@@ -36,7 +36,7 @@ For the complete Tailscale SSH, Serve, and future remote-worker setup, read [the
 - Duplicate archive-member preservation
 - Circular/linear sequence metadata and GenBank feature counts
 - Per-record parser-warning retention for annotation review
-- Searchable local sequence inventory
+- Paginated sequence library with literal name/source search, total counts and recoverable loading errors
 - Circular and linear maps with strand arrows, coordinate ticks, overlap-aware tracks, zoom and focused annotation review
 - Primer3-backed PCR candidate generation with persisted design parameters and evidence
 - Revision-scoped AB1 upload, local Sanger alignment, coverage and quality-aware difference review
@@ -77,3 +77,10 @@ Unknown topology uses a clearly labeled linear coordinate view.
 
 Geometry checks: `node --test tests/ui/sequence-map.test.cjs`.
 Browser checks: `python scripts/verify_sequence_map_ui.py` with the UI dependencies above.
+
+The library offers 24, 48 or 96 records per page. Searches reset to the first page;
+late responses from an older search or construct are ignored. The paginated API is
+`GET /api/sequence-library?query=...&limit=24&offset=0`, returning `items`, `total`,
+`offset`, `limit` and `has_more`. The existing `/api/sequences` array response remains
+available for compatibility. Search metacharacters in the paginated endpoint are literal.
+Run `python scripts/verify_library_ui.py` for pagination, stale-response and error-recovery checks.

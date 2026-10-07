@@ -3,3 +3,4 @@ recursive-include docs *.md
 include scripts/verify_sanger_ui.py
 recursive-include tests *.cjs
 include scripts/verify_sequence_map_ui.py
+include scripts/verify_library_ui.py

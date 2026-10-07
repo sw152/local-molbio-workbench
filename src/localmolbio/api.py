@@ -130,6 +130,31 @@ def list_sequences(query: str = "", limit: int = 200) -> list[dict[str, object]]
     return [dict(row) for row in rows]
 
 
+@app.get("/api/sequence-library")
+def paginated_sequences(
+    query: str = Query(default="", max_length=500),
+    limit: int = Query(default=24, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    # Escape LIKE metacharacters: a name containing % or _ is a literal search.
+    escaped = query.strip().replace("!", "!!").replace("%", "!%").replace("_", "!_")
+    like = f"%{escaped}%"
+    where = "display_name LIKE ? ESCAPE '!' OR archive_member_name LIKE ? ESCAPE '!'"
+    with connect() as connection:
+        # The count and page share a read snapshot even if another client imports.
+        connection.execute("BEGIN")
+        total = connection.execute(f"SELECT COUNT(*) FROM sequences WHERE {where}", (like, like)).fetchone()[0]
+        rows = connection.execute(
+            f"""SELECT id, display_name, archive_member_name, archive_member_occurrence,
+                       length_bp, topology, molecule_type, feature_count, sequence_sha256, parse_warning_count
+                FROM sequences WHERE {where}
+                ORDER BY display_name COLLATE NOCASE, archive_member_index, id
+                LIMIT ? OFFSET ?""", (like, like, limit, offset),
+        ).fetchall()
+    return {"items": [dict(row) for row in rows], "total": total, "offset": offset,
+            "limit": limit, "has_more": offset + len(rows) < total}
+
+
 @app.get("/api/sequences/{sequence_id}")
 def sequence_detail(sequence_id: str) -> dict[str, object]:
     with connect() as connection:
