@@ -114,7 +114,7 @@ try:
         expect(page.locator('.trace-svg [data-channel]')).to_have_count(4)
         expect(page.locator('.trace-selected')).to_have_attribute('data-peak-position','200')
         page.locator('.trace-view').screenshot(path=str(artifacts/'trace-desktop.png'))
-        page.get_by_role('button',name='Next →',exact=True).click()
+        page.locator('#sanger-reads').get_by_role('button',name='Next →',exact=True).click()
         expect(page.locator('.trace-view')).to_contain_text('Bases 213–236 of 600')
         page.locator('.trace-position').fill('201')
         page.get_by_role('button',name='Go',exact=True).click()

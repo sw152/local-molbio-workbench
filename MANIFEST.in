@@ -5,3 +5,4 @@ recursive-include tests *.cjs
 include scripts/verify_sequence_map_ui.py
 include scripts/verify_library_ui.py
 include scripts/verify_primer_ui.py
+include scripts/verify_fastq_ui.py

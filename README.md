@@ -364,4 +364,4 @@ Revision-scoped FASTQ / FASTQ.gz registration now preserves original bytes and
 computes bounded streaming format, read-length and quality summaries. Uploads
 require an explicit Phred+33 declaration; encoding, paired reads and sequencing
 platform are not inferred. This API does not perform alignment or consensus,
-and the FASTQ upload UI is still pending. See [format support, API and limits](docs/fastq-inputs.zh-CN.md).
+and the construct view includes FASTQ upload, paginated quality summaries and recoverable error states. The UI requires an explicit Phred+33 declaration; quality bands are disjoint Q<20 / Q20–29 / Q30+ counts. Browser checks: `python scripts/verify_fastq_ui.py`. See [format support, API and limits](docs/fastq-inputs.zh-CN.md).
