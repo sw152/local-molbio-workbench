@@ -3,6 +3,10 @@
   const el = id => document.getElementById(id);
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const percent = value => Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : 'Unavailable';
+  function timestamp(value) {
+    const date=new Date(value);
+    return Number.isNaN(date.getTime())?'Time not recorded':date.toISOString().replace('T',' ').replace(/\.\d{3}Z$/,' UTC');
+  }
   const flags = {
     ambiguous_alignment: 'Multiple equally scoring alignments — placement needs review',
     candidate_search_truncated: 'Repeated sequence: search limit reached',
@@ -27,7 +31,7 @@
     el('sanger-upload-button').disabled = busy || !state;
     el('sanger-file').disabled = busy || !state;
     el('sanger-direction').disabled = busy || !state;
-    el('sanger-reads').querySelectorAll('[data-analyze]').forEach(b => b.disabled = busy);
+    el('sanger-reads').querySelectorAll('[data-analyze], [data-analysis-direction], [data-history-page], [data-view-run], [data-latest-run]').forEach(b => b.disabled = busy);
   }
   function clear() {
     generation++;
@@ -52,14 +56,41 @@
     if (!variants.length) return '<p class="evidence-note">No differences in the aligned region. Uncovered positions remain unassessed.</p>';
     return `<details class="variant-details"><summary>${variants.length} difference / uncertain base call${variants.length === 1 ? '' : 's'} <span>Inspect calls</span></summary><div class="variant-scroll"><table><thead><tr><th>Reference position</th><th>Type</th><th>Reference → read</th><th>Read base¹</th><th>Phred</th></tr></thead><tbody>${variants.map(v => `<tr><td>${v.kind === 'insertion' ? `Boundary after ${Number(v.position)}` : Number(v.position) + 1}</td><td>${escape(v.kind)}</td><td><code>${escape(v.reference || '–')} → ${escape(v.read || '–')}</code></td><td>${v.original_read_position == null ? '–' : `<button class="trace-jump" data-trace-position="${Number(v.original_read_position)}" title="Inspect chromatogram at this read base">${Number(v.original_read_position) + 1} ↗</button>`}</td><td>${v.phred == null ? 'Unavailable' : Number(v.phred)}</td></tr>`).join('')}</tbody></table></div><p class="evidence-note">¹ One-based position in the original uploaded read. Insertions use a boundary after the indicated reference base; boundary 0 is before base 1.</p></details>`;
   }
+  function reportView(read, report, latest) {
+    const evidence=report.evidence||{},review=evidence.review_flags||[],params=evidence.parameters||{};
+    return `<div class="analysis-version ${latest?'':'historical'}"><b>Run ${report.run_number} · ${latest?'Latest saved analysis':'Historical analysis'}</b><time>${escape(timestamp(report.analyzed_at))}</time><span>${escape(evidence.direction||'Unrecorded')} orientation · requested ${escape(evidence.requested_direction||params.requested_direction||'unrecorded')}</span></div><div class="read-metrics"><div><span>Original mean quality</span><strong>${read.quality_summary?.mean_phred==null?'Unavailable':`Q${Number(read.quality_summary.mean_phred).toFixed(1)}`}</strong></div><div><span>Aligned identity</span><strong>${percent(report.identity_fraction)}</strong></div><div><span>Read aligned</span><strong>${percent(evidence.read_aligned_fraction)}</strong></div></div>${coverage(evidence,state.length)}${review.length?`<ul class="read-flags">${review.map(flag=>`<li>${escape(flags[flag]||flag)}</li>`).join('')}</ul>`:''}${differences(report.variants||[])}<p class="analysis-method">${escape(params.algorithm||'Method not recorded')} ${escape(params.algorithm_version||'')} · evidence ${escape(params.evidence_version||'unrecorded')} · trimming ${escape(params.trimming||'not recorded')}<br>Job <code title="${escape(report.job_id)}">${escape(report.job_id)}</code></p>`;
+  }
   function render(reads) {
-    el('sanger-reads').innerHTML = reads.length ? reads.map(read => {
-      const evidence = read.evidence || {}, analyzed = Boolean(read.alignment_id);
-      const review = evidence.review_flags || [];
-      return `<article class="read-card" data-read-id="${escape(read.id)}"><header class="read-heading"><div><b>${escape(read.original_filename)}</b><small>${Number(read.length_bp).toLocaleString()} bases · ${escape(analyzed ? evidence.direction || read.direction : read.direction)} orientation</small></div><span class="badge ${review.length ? 'review' : ''}">${analyzed ? review.length ? 'Review needed' : 'Aligned region' : 'Ready to analyze'}</span></header><div class="read-metrics"><div><span>Mean quality</span><strong>${read.quality_summary?.mean_phred == null ? 'Unavailable' : `Q${Number(read.quality_summary.mean_phred).toFixed(1)}`}</strong></div><div><span>Aligned identity</span><strong>${analyzed ? percent(read.identity_fraction) : '—'}</strong></div><div><span>Read aligned</span><strong>${analyzed ? percent(evidence.read_aligned_fraction) : '—'}</strong></div></div>${analyzed ? coverage(evidence, state.length) + (review.length ? `<ul class="read-flags">${review.map(flag => `<li>${escape(flags[flag] || flag)}</li>`).join('')}</ul>` : '') + differences(read.variants || []) : `<button class="export" data-analyze="${escape(read.id)}">Analyze against this revision</button>`}<button class="trace-toggle" data-trace-open>View chromatogram</button><div class="trace-view" hidden></div></article>`;
-    }).join('') : '<div class="read-empty"><span>＋</span><b>No reads attached to this revision</b><p>Add an AB1 chromatogram to review its sequence evidence.</p></div>';
+    state.reads=new Map(reads.map(r=>[r.id,r]));
+    el('sanger-reads').innerHTML=reads.length?reads.map(read=>{
+      const analyzed=Boolean(read.alignment_id);
+      return `<article class="read-card" data-read-id="${escape(read.id)}"><header class="read-heading"><div><b>${escape(read.original_filename)}</b><small>${Number(read.length_bp).toLocaleString()} original bases · upload orientation ${escape(read.direction)}</small></div><span class="badge">${analyzed?`${read.run_number} saved run${read.run_number===1?'':'s'}`:'Ready to analyze'}</span></header><div class="analysis-report">${analyzed?reportView(read,read,true):''}</div><div class="analysis-actions"><label>Direction for new analysis<select data-analysis-direction>${['unknown','forward','reverse'].map(v=>`<option value="${v}" ${v===(read.evidence?.requested_direction||read.direction)?'selected':''}>${v==='unknown'?'Detect automatically':v==='forward'?'Forward':'Reverse complement'}</option>`).join('')}</select></label><button class="export" data-analyze="${escape(read.id)}">${analyzed?'Run new analysis':'Analyze against this revision'}</button></div>${analyzed?`<p class="evidence-note">A new run preserves every saved report and the original AB1. No quality trimming is applied.</p><button class="analysis-history-button" data-history-page="0">Browse saved analyses</button><div class="analysis-history" aria-live="polite"></div>`:''}<button class="trace-toggle" data-trace-open>View chromatogram</button><div class="trace-view" hidden></div></article>`;
+    }).join(''):'<div class="read-empty"><span>＋</span><b>No reads attached to this revision</b><p>Add an AB1 chromatogram to review its sequence evidence.</p></div>';
     controls();
   }
+  el('sanger-reads').addEventListener('click',async event=>{
+    const card=event.target.closest('.read-card');
+    if(!card||!state||busy)return;
+    const read=state.reads.get(card.dataset.readId),token=generation;
+    const show=event.target.closest('[data-view-run], [data-latest-run]');
+    if(show){
+      const report=show.hasAttribute('data-latest-run')?read:card.analysisHistory?.get(show.dataset.viewRun);
+      if(report){card.querySelector('.analysis-report').innerHTML=reportView(read,report,report.alignment_id===read.alignment_id);card.querySelectorAll('[data-view-run]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.viewRun===report.alignment_id)));}
+      return;
+    }
+    const page=event.target.closest('[data-history-page]');
+    if(!page||page.disabled||card.historyLoading)return;
+    card.historyLoading=true;page.disabled=true;
+    const panel=card.querySelector('.analysis-history'),offset=Number(page.dataset.historyPage);
+    panel.textContent='Loading saved analyses…';
+    try{
+      const result=await request(`/api/sanger-reads/${encodeURIComponent(read.id)}/analyses?limit=5&offset=${offset}`);
+      if(token!==generation||!card.isConnected)return;
+      card.analysisHistory=new Map(result.items.map(r=>[r.alignment_id,r]));
+      panel.innerHTML=`<p>${result.total} saved analyses · newest first · showing ${result.offset+1}–${result.offset+result.items.length}</p><div class="history-runs">${result.items.map(r=>`<button data-view-run="${escape(r.alignment_id)}" aria-pressed="false">Run ${r.run_number}<small>${escape(r.evidence?.direction||'Unrecorded')} · ${escape(timestamp(r.analyzed_at))}</small></button>`).join('')}</div><nav>${offset>0?`<button data-history-page="${Math.max(0,offset-5)}">← Newer runs</button>`:''}${result.has_more?`<button data-history-page="${offset+5}">Older runs →</button>`:''}<button data-latest-run>Show latest report</button></nav>`;
+    }catch(error){if(token===generation&&card.isConnected){panel.innerHTML=`<p class="sanger-error">Could not load history: ${escape(error.message)}</p><button data-history-page="${offset}">Retry history</button>`;}}
+    finally{if(card.isConnected){card.historyLoading=false;page.disabled=busy;}}
+  });
   async function refresh(token) {
     const reads = await request(`/api/sequence-revisions/${encodeURIComponent(state.id)}/sanger-reads`);
     if (token === generation) render(reads);
@@ -99,7 +130,7 @@
     const token = generation;
     busy = true; controls(); status('Aligning read and collecting evidence…');
     try {
-      await request('/api/sanger-verifications', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sequencing_read_id:button.dataset.analyze})});
+      await request('/api/sanger-verifications', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sequencing_read_id:button.dataset.analyze,previous_alignment_id:state.reads.get(button.dataset.analyze)?.alignment_id||null,direction:button.closest('.read-card').querySelector('[data-analysis-direction]').value})});
       if (token !== generation) return;
       await refresh(token);
       if (token === generation) status('Analysis saved. Review coverage and differences below.');

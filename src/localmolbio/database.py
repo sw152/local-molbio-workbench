@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 from pathlib import Path
 
 from .config import database_path
@@ -135,6 +136,19 @@ CREATE TABLE IF NOT EXISTS sanger_alignments (
 
 CREATE INDEX IF NOT EXISTS sanger_alignments_revision_idx ON sanger_alignments(sequence_revision_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS sanger_analysis_runs (
+    id TEXT PRIMARY KEY,
+    sequencing_read_id TEXT NOT NULL REFERENCES sequencing_reads(id) ON DELETE RESTRICT,
+    sequence_revision_id TEXT NOT NULL REFERENCES sequence_revisions(id) ON DELETE RESTRICT,
+    analysis_job_id TEXT NOT NULL REFERENCES analysis_jobs(id) ON DELETE RESTRICT,
+    run_number INTEGER NOT NULL CHECK(run_number > 0),
+    previous_alignment_id TEXT REFERENCES sanger_analysis_runs(id) ON DELETE RESTRICT,
+    report_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(sequencing_read_id, sequence_revision_id, run_number)
+);
+CREATE INDEX IF NOT EXISTS sanger_runs_read_idx ON sanger_analysis_runs(sequencing_read_id, run_number DESC);
+
 CREATE TABLE IF NOT EXISTS audit_events (
     id TEXT PRIMARY KEY,
     object_type TEXT NOT NULL,
@@ -162,6 +176,13 @@ def initialise(path: Path | None = None) -> None:
         connection.executescript(SCHEMA)
         _add_column_if_missing(connection, "sequencing_reads", "qualities_json TEXT NOT NULL DEFAULT '[]'")
         _add_column_if_missing(connection, "sanger_alignments", "evidence_json TEXT NOT NULL DEFAULT '{}'")
+        # Additive migration: retain legacy rows and preserve their IDs, jobs and evidence.
+        for row in connection.execute("SELECT a.* FROM sanger_alignments a WHERE NOT EXISTS (SELECT 1 FROM sanger_analysis_runs r WHERE r.id = a.id)").fetchall():
+            report = {key: row[key] for key in ("reference_start", "reference_end", "wraps_origin", "aligned_bases", "matched_bases", "mismatched_bases", "inserted_bases", "deleted_bases", "identity_fraction")}
+            report["variants"] = json.loads(row["variants_json"])
+            report["evidence"] = json.loads(row["evidence_json"])
+            connection.execute("INSERT INTO sanger_analysis_runs (id, sequencing_read_id, sequence_revision_id, analysis_job_id, run_number, report_json, created_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
+                               (row["id"], row["sequencing_read_id"], row["sequence_revision_id"], row["analysis_job_id"], json.dumps(report), row["created_at"]))
         _add_column_if_missing(
             connection, "imports", "parse_warning_records INTEGER NOT NULL DEFAULT 0"
         )

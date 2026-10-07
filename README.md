@@ -58,6 +58,26 @@ The trace always uses the uploaded read orientation, including for reverse align
 Missing or inconsistent trace metadata is reported; no replacement signal is generated.
 High identity alone does not verify the whole plasmid.
 
+“Run new analysis” saves another report without replacing previous evidence. You
+can change the requested orientation for the new run; the upload metadata stays
+unchanged. “Browse saved analyses” pages through history and opens old coverage
+and difference reports, clearly labeled as historical. Each new report records its
+method version, effective parameters, input hashes and predecessor. No quality
+trimming is applied yet.
+
+Every run reparses the hash-checked original AB1 and requires its calls and existing
+saved qualities to agree. Missing historical per-base qualities can be recovered
+for the new run. Missing or altered files, inconsistent calls and failed analyses
+leave saved reports intact. Existing one-report databases migrate additively into
+analysis history on startup, preserving the legacy table and identifiers.
+
+API: `POST /api/sanger-verifications` accepts `sequencing_read_id`, optional
+`direction`, and `previous_alignment_id` (the latest report ID, required for reruns).
+Stale predecessors return 409, including when another request finishes first.
+`GET /api/sanger-reads/{id}/analyses?limit=10&offset=0` returns newest-first reports
+with pagination metadata. The revision read list continues to show one row per
+read, with its latest report.
+
 For reproducible browser checks, install `.[dev,ui]` and run
 `python scripts/verify_sanger_ui.py`. It uses an installed macOS Chrome or Playwright
 Chromium (install the latter with `python -m playwright install chromium` if needed).

@@ -112,6 +112,29 @@ try:
         page.locator('#sanger-file').set_input_files(str(read_path))
         page.get_by_role('button',name='Attach AB1',exact=True).click()
         expect(page.locator('#sanger-status')).to_contain_text('already attached')
+        # A rerun creates an independent report, with the first still selectable.
+        page.locator('[data-analysis-direction]').select_option('forward')
+        page.get_by_role('button',name='Run new analysis',exact=True).click()
+        expect(page.locator('.analysis-version')).to_contain_text('Run 2 · Latest')
+        expect(page.locator('.analysis-version')).to_contain_text('requested forward')
+        page.route('**/api/sanger-reads/*/analyses?*',lambda route:route.abort(),times=1)
+        page.get_by_role('button',name='Browse saved analyses').click()
+        expect(page.locator('.analysis-history')).to_contain_text('Could not load history')
+        page.get_by_role('button',name='Retry history').click()
+        expect(page.locator('.history-runs button')).to_have_count(2)
+        page.locator('.history-runs button').filter(has_text='Run 1').click()
+        expect(page.locator('.analysis-version')).to_contain_text('Run 1 · Historical')
+        expect(page.locator('.analysis-version')).to_contain_text('requested unknown')
+        page.locator('#sanger-panel').screenshot(path=str(artifacts/'history-desktop.png'))
+        page.get_by_role('button',name='Show latest report').click()
+        expect(page.locator('.analysis-version')).to_contain_text('Run 2 · Latest')
+        page.route('**/api/sanger-verifications',lambda route:route.fulfill(status=409,content_type='application/json',body=json.dumps({'detail':'Analysis history changed; reload before starting a new analysis'})),times=1)
+        page.get_by_role('button',name='Run new analysis',exact=True).click()
+        expect(page.locator('#sanger-status')).to_contain_text('history changed')
+        expect(page.get_by_role('button',name='Run new analysis',exact=True)).to_be_enabled()
+        expect(page.locator('.analysis-version')).to_contain_text('Run 2 · Latest')
+        page.reload();page.get_by_role('button',name='Open map').click()
+        expect(page.locator('.analysis-version')).to_contain_text('Run 2 · Latest')
         page.set_viewport_size({'width':390,'height':844})
         page.locator('.variant-details summary').click()
         page.locator('.trace-jump').click()
@@ -125,6 +148,29 @@ try:
         page.screenshot(path=str(artifacts/'sanger-mobile-details.png'))
         assert page.locator('#sanger-panel').evaluate('(el) => el.scrollWidth <= el.clientWidth + 1')
         assert page.locator('#map-panel').evaluate('(el) => el.scrollWidth <= el.clientWidth + 1'), page.locator('#map-panel').evaluate('(el) => Array.from(el.querySelectorAll("*")).filter(e => e.getBoundingClientRect().right > innerWidth).map(e => [e.tagName,e.className,e.getBoundingClientRect().width]).slice(0,25)')
+        # More runs exercise real history pagination without duplicating read cards.
+        read_id=page.locator('.read-card').get_attribute('data-read-id')
+        previous=httpx.get(base+f'/api/sanger-reads/{read_id}/analyses').json()['items'][0]['alignment_id']
+        for _ in range(4):
+            response=httpx.post(base+'/api/sanger-verifications',json={'sequencing_read_id':read_id,'previous_alignment_id':previous})
+            assert response.status_code==201,response.text
+            previous=response.json()['id']
+        page.reload();page.get_by_role('button',name='Open map').click()
+        expect(page.locator('.read-card')).to_have_count(1)
+        expect(page.locator('.analysis-version')).to_contain_text('Run 6 · Latest')
+        page.get_by_role('button',name='Browse saved analyses').click()
+        expect(page.locator('.history-runs button')).to_have_count(5)
+        page.get_by_role('button',name='Older runs').click()
+        expect(page.locator('.history-runs button')).to_have_count(1)
+        page.locator('.history-runs button').click()
+        expect(page.locator('.analysis-version')).to_contain_text('Run 1 · Historical')
+        page.locator('.analysis-version').evaluate('(el)=>el.scrollIntoView({block:"start"})')
+        page.screenshot(path=str(artifacts/'history-mobile-report.png'))
+        page.locator('.analysis-history').evaluate('(el)=>el.scrollIntoView({block:"center"})')
+        page.screenshot(path=str(artifacts/'history-mobile-pagination.png'))
+        assert page.locator('#map-panel').evaluate('(el)=>el.scrollWidth<=el.clientWidth+1')
+        page.get_by_role('button',name='Newer runs').click()
+        expect(page.locator('.history-runs button')).to_have_count(5)
         # Optional externally supplied public ABI fixture; never bundled or committed.
         public_fixture = os.environ.get('MOLBIO_PUBLIC_AB1')
         if public_fixture:
@@ -147,7 +193,7 @@ try:
         expect(page.locator('#sanger-status')).to_contain_text('Could not load reads')
         assert not errors, errors
         browser.close()
-    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['binary ABIF upload','invalid and duplicate upload','analysis and persisted evidence','Q12 variant and focused chromatogram','desktop and mobile layouts','network failure','no JS exceptions']},indent=2))
+    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['binary ABIF upload','invalid and duplicate upload','analysis and persisted evidence','append-only rerun and historical report switching','six-run history pagination','history network failure and stale rerun recovery','Q12 variant and focused chromatogram','desktop and mobile layouts','network failure','no JS exceptions']},indent=2))
 finally:
     server.terminate()
     server.wait(timeout=10)

@@ -52,6 +52,8 @@ class PrimerSelectionInput(BaseModel):
 
 class SangerVerificationInput(BaseModel):
     sequencing_read_id: str
+    previous_alignment_id: Optional[str] = None
+    direction: Optional[Literal["forward", "reverse", "unknown"]] = None
 
 
 def _utc_now() -> str:
@@ -619,61 +621,86 @@ async def upload_sanger_read(
         temporary_path.unlink(missing_ok=True)
 
 
+def _analysis_report(row) -> dict:
+    report = json.loads(row["report_json"])
+    if not report.get("evidence"):
+        report["evidence"] = {"scope": "legacy_local_alignment", "review_flags": ["legacy_evidence_unavailable"], "whole_reference_verified": False}
+    return {**report, "alignment_id": row["id"], "job_id": row["analysis_job_id"],
+            "run_number": row["run_number"], "previous_alignment_id": row["previous_alignment_id"],
+            "analyzed_at": row["created_at"]}
+
+
+def _check_previous(connection, read_id, expected):
+    latest = connection.execute("SELECT id, run_number FROM sanger_analysis_runs WHERE sequencing_read_id = ? ORDER BY run_number DESC LIMIT 1", (read_id,)).fetchone()
+    if (latest["id"] if latest else None) != expected:
+        raise HTTPException(status_code=409, detail="Analysis history changed or a report already exists; reload before starting a new analysis")
+    return latest["run_number"] + 1 if latest else 1
+
+
 @app.post("/api/sanger-verifications", status_code=201)
 def create_sanger_verification(request: SangerVerificationInput) -> dict[str, object]:
     with connect() as connection:
         row = connection.execute(
-            """
-            SELECT reads.id, reads.sequence_revision_id, reads.base_sequence, reads.direction,
-                   reads.qualities_json, reads.file_sha256,
-                   revisions.sequence_text, revisions.sequence_sha256, revisions.topology
-            FROM sequencing_reads AS reads
-            JOIN sequence_revisions AS revisions ON revisions.id = reads.sequence_revision_id
-            WHERE reads.id = ?
-            """,
-            (request.sequencing_read_id,),
+            """SELECT reads.*, revisions.sequence_text, revisions.sequence_sha256, revisions.topology
+               FROM sequencing_reads AS reads
+               JOIN sequence_revisions AS revisions ON revisions.id = reads.sequence_revision_id
+               WHERE reads.id = ?""", (request.sequencing_read_id,),
         ).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Sanger read not found")
+        if not row:
+            raise HTTPException(status_code=404, detail="Sanger read not found")
+        _check_previous(connection, row["id"], request.previous_alignment_id)
+    # Reparse hash-checked original input; historical reads may lack saved per-base qualities.
     try:
-        result = align_sanger_read(
-            row["sequence_text"], row["base_sequence"], row["direction"], row["topology"] == "circular",
-            qualities=json.loads(row["qualities_json"]) or None
-        )
+        path = Path(row["storage_path"])
+        if file_sha256(path) != row["file_sha256"]:
+            raise HTTPException(status_code=409, detail="Original AB1 hash changed; analysis was not saved")
+        parsed = parse_ab1(path)
+        if file_sha256(path) != row["file_sha256"]:
+            raise HTTPException(status_code=409, detail="Original AB1 changed during parsing; analysis was not saved")
+    except OSError as exc:
+        raise HTTPException(status_code=409, detail="Original AB1 file is unavailable; analysis was not saved") from exc
+    except SangerReadError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    saved_qualities = json.loads(row["qualities_json"])
+    if parsed.sequence != row["base_sequence"] or (saved_qualities and saved_qualities != parsed.qualities):
+        raise HTTPException(status_code=409, detail="Original AB1 calls or qualities disagree with the saved read; analysis was not saved")
+    direction = request.direction or row["direction"]
+    started = _utc_now()
+    try:
+        result = align_sanger_read(row["sequence_text"], parsed.sequence, direction,
+                                   row["topology"] == "circular", qualities=parsed.qualities or None)
     except SangerVerificationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Alignment engine failed; existing reports were preserved") from exc
     job_id, alignment_id, now = str(uuid4()), str(uuid4()), _utc_now()
+    report = {key: getattr(result, key) for key in ("reference_start", "reference_end", "wraps_origin", "aligned_bases", "matched_bases", "mismatched_bases", "inserted_bases", "deleted_bases", "identity_fraction", "variants", "evidence")}
+    parameters = {**ALIGNMENT_PARAMETERS, "requested_direction": direction,
+                  "original_read_direction": row["direction"], "quality_source": "hash_checked_original_ab1",
+                  "reference_topology": row["topology"], "trimming": "none"}
+    result.evidence["parameters"] = parameters
     summary = {"identity_fraction": result.identity_fraction, "variant_count": len(result.variants), "evidence": result.evidence}
     with connect() as connection:
-        existing = connection.execute(
-            "SELECT id FROM sanger_alignments WHERE sequencing_read_id = ? AND sequence_revision_id = ?",
-            (row["id"], row["sequence_revision_id"]),
-        ).fetchone()
-        if existing:
-            raise HTTPException(status_code=409, detail="This read has already been verified against the revision")
+        # Check again under the write lock: simultaneous requests cannot create two runs.
+        connection.execute("BEGIN IMMEDIATE")
+        run_number = _check_previous(connection, row["id"], request.previous_alignment_id)
         connection.execute(
-            """
-            INSERT INTO analysis_jobs (id, sequence_revision_id, job_kind, status, parameters_json,
+            """INSERT INTO analysis_jobs (id, sequence_revision_id, job_kind, status, parameters_json,
                 input_manifest_json, result_summary_json, created_at, started_at, completed_at)
-            VALUES (?, ?, 'sanger-verification', 'succeeded', ?, ?, ?, ?, ?, ?)
-            """,
-            (job_id, row["sequence_revision_id"], json.dumps(ALIGNMENT_PARAMETERS), json.dumps({"read_id": row["id"], "read_sha256": row["file_sha256"], "reference_sha256": row["sequence_sha256"]}), json.dumps(summary), now, now, now),
+               VALUES (?, ?, 'sanger-verification', 'succeeded', ?, ?, ?, ?, ?, ?)""",
+            (job_id, row["sequence_revision_id"], json.dumps(parameters),
+             json.dumps({"read_id": row["id"], "read_sha256": row["file_sha256"], "reference_sha256": row["sequence_sha256"], "previous_alignment_id": request.previous_alignment_id}),
+             json.dumps(summary), started, started, now),
         )
         connection.execute(
-            """
-            INSERT INTO sanger_alignments (id, sequencing_read_id, sequence_revision_id, analysis_job_id,
-                reference_start, reference_end, wraps_origin, aligned_bases, matched_bases,
-                mismatched_bases, inserted_bases, deleted_bases, identity_fraction, variants_json, created_at, evidence_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (alignment_id, row["id"], row["sequence_revision_id"], job_id, result.reference_start,
-             result.reference_end, int(result.wraps_origin), result.aligned_bases, result.matched_bases,
-             result.mismatched_bases, result.inserted_bases, result.deleted_bases,
-             result.identity_fraction, json.dumps(result.variants), now, json.dumps(result.evidence)),
+            """INSERT INTO sanger_analysis_runs (id, sequencing_read_id, sequence_revision_id, analysis_job_id,
+               run_number, previous_alignment_id, report_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (alignment_id, row["id"], row["sequence_revision_id"], job_id, run_number, request.previous_alignment_id, json.dumps(report), now),
         )
-    return {"id": alignment_id, "job_id": job_id, **summary, "variants": result.variants,
-            "reference_start": result.reference_start, "reference_end": result.reference_end,
-            "wraps_origin": result.wraps_origin}
+        connection.execute("INSERT INTO audit_events (id, object_type, object_id, action, payload_json, created_at) VALUES (?, 'sequencing-read', ?, 'analysis-created', ?, ?)",
+                           (str(uuid4()), row["id"], json.dumps({"alignment_id":alignment_id,"previous_alignment_id":request.previous_alignment_id,"run_number":run_number}), now))
+    return {"id": alignment_id, "job_id": job_id, "run_number": run_number,
+            "previous_alignment_id": request.previous_alignment_id, **summary, **report}
 
 
 @app.get("/api/sequence-revisions/{revision_id}/sanger-reads")
@@ -681,25 +708,26 @@ def list_sanger_reads(revision_id: str) -> list[dict[str, object]]:
     with connect() as connection:
         if not connection.execute("SELECT id FROM sequence_revisions WHERE id = ?", (revision_id,)).fetchone():
             raise HTTPException(status_code=404, detail="Sequence revision not found")
-        rows = connection.execute(
-            """SELECT r.id, r.original_filename, r.length_bp, r.direction,
-                      r.quality_summary_json, r.created_at,
-                      a.id AS alignment_id, a.identity_fraction, a.reference_start,
-                      a.reference_end, a.wraps_origin, a.variants_json, a.evidence_json
-               FROM sequencing_reads r LEFT JOIN sanger_alignments a
-               ON a.sequencing_read_id = r.id AND a.sequence_revision_id = r.sequence_revision_id
-               WHERE r.sequence_revision_id = ? ORDER BY r.created_at DESC""", (revision_id,)
-        ).fetchall()
-    output = []
-    for row in rows:
-        item = dict(row)
-        for field, default in (("quality_summary", {}), ("variants", []), ("evidence", {})):
-            raw = item.pop(field + "_json")
-            item[field] = json.loads(raw) if raw else default
-        if item["alignment_id"] and not item["evidence"]:
-            item["evidence"] = {"scope": "legacy_local_alignment", "review_flags": ["legacy_evidence_unavailable"], "whole_reference_verified": False}
-        output.append(item)
+        rows = connection.execute("SELECT id, original_filename, length_bp, direction, quality_summary_json, created_at FROM sequencing_reads WHERE sequence_revision_id = ? ORDER BY created_at DESC", (revision_id,)).fetchall()
+        output = []
+        for row in rows:
+            item = dict(row)
+            item["quality_summary"] = json.loads(item.pop("quality_summary_json"))
+            latest = connection.execute("SELECT * FROM sanger_analysis_runs WHERE sequencing_read_id = ? ORDER BY run_number DESC LIMIT 1", (row["id"],)).fetchone()
+            item.update(_analysis_report(latest) if latest else {"alignment_id":None,"variants":[],"evidence":{}})
+            output.append(item)
     return output
+
+
+@app.get("/api/sanger-reads/{read_id}/analyses")
+def list_sanger_analyses(read_id: str, limit: int = Query(default=10, ge=1, le=100), offset: int = Query(default=0, ge=0)) -> dict:
+    with connect() as connection:
+        connection.execute("BEGIN")
+        if not connection.execute("SELECT id FROM sequencing_reads WHERE id = ?", (read_id,)).fetchone():
+            raise HTTPException(status_code=404, detail="Sanger read not found")
+        total = connection.execute("SELECT COUNT(*) FROM sanger_analysis_runs WHERE sequencing_read_id = ?", (read_id,)).fetchone()[0]
+        rows = connection.execute("SELECT * FROM sanger_analysis_runs WHERE sequencing_read_id = ? ORDER BY run_number DESC LIMIT ? OFFSET ?", (read_id, limit, offset)).fetchall()
+    return {"items":[_analysis_report(row) for row in rows],"total":total,"offset":offset,"limit":limit,"has_more":offset+len(rows)<total}
 
 
 @app.get("/api/sanger-reads/{read_id}/trace")
