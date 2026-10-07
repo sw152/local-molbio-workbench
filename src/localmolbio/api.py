@@ -32,6 +32,7 @@ import primer3
 from .sanger import SangerReadError, file_sha256, parse_ab1
 from .sanger_report import load_analysis_export, render_analysis_html
 from .sanger_summary import summarize_sanger_reads
+from .sanger_group_report import snapshot_digest, build_group_export, render_group_html
 from .sanger_verification import ALIGNMENT_PARAMETERS, SangerVerificationError, align_sanger_read
 
 
@@ -726,7 +727,7 @@ def create_sanger_verification(request: SangerVerificationInput) -> dict[str, ob
 def list_sanger_reads(revision_id: str, include_summary: bool = False) -> list[dict[str, object]] | dict:
     with connect() as connection:
         connection.execute("BEGIN")
-        reference = connection.execute("SELECT id,sequence_text,length(sequence_text) AS length_bp,sequence_sha256 AS sha256,topology FROM sequence_revisions WHERE id = ?", (revision_id,)).fetchone()
+        reference = connection.execute("SELECT id,label,sequence_text,length(sequence_text) AS length_bp,sequence_sha256 AS sha256,topology FROM sequence_revisions WHERE id = ?", (revision_id,)).fetchone()
         if not reference:
             raise HTTPException(status_code=404, detail="Sequence revision not found")
         rows = connection.execute("SELECT id, original_filename, length_bp, direction, file_sha256, base_sequence, qualities_json, quality_summary_json, created_at FROM sequencing_reads WHERE sequence_revision_id = ? ORDER BY created_at DESC,id", (revision_id,)).fetchall()
@@ -748,8 +749,23 @@ def list_sanger_reads(revision_id: str, include_summary: bool = False) -> list[d
     if include_summary:
         metadata=dict(reference)
         sequence=metadata.pop("sequence_text")
-        return {"reads":output,"summary":summarize_sanger_reads(metadata,records,sequence)}
+        view={"reads":output,"summary":summarize_sanger_reads(metadata,records,sequence)}
+        view["snapshot_sha256"]=snapshot_digest(view)
+        return view
     return output
+
+
+@app.get("/api/sequence-revisions/{revision_id}/sanger-report")
+def export_sanger_group(revision_id: str, expected_snapshot: str = Query(pattern=r"^[a-f0-9]{64}$"), format: Literal["json", "html"] = "json") -> Response:
+    view=list_sanger_reads(revision_id,include_summary=True)
+    if view["snapshot_sha256"]!=expected_snapshot:
+        raise HTTPException(status_code=409,detail="Group evidence changed; reopen this construct to review the latest snapshot before exporting")
+    payload=build_group_export(view)
+    content=json.dumps(payload,indent=2,ensure_ascii=False) if format=="json" else render_group_html(payload)
+    return Response(content=content,media_type="application/json" if format=="json" else "text/html; charset=utf-8",
+                    headers={"Content-Disposition":f'attachment; filename="sanger-group-{expected_snapshot[:16]}.{format}"',
+                             "X-Content-Type-Options":"nosniff","Cache-Control":"no-store",
+                             "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"})
 
 
 @app.get("/api/sanger-reads/{read_id}/analyses")

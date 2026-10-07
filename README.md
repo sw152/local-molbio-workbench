@@ -271,3 +271,27 @@ Insertion/deletion conflicts are **not evaluated**. Zero observed conflicts does
 not assess missing, excluded or low-quality evidence. Original files are not
 reopened for the summary; legacy stored quality arrays may be absent, in which
 case the saved per-base analysis evidence remains the quality source.
+
+## Export a group evidence snapshot
+
+“Group JSON” and “Group HTML” export the current revision's complete displayed
+read-group snapshot: each attached read's latest saved analysis, both coverage
+layers, gaps, conflicts, excluded sources, analysis parameters and base mappings.
+The standalone HTML works offline and includes expandable full evidence; JSON
+is the machine-readable copy. No raw AB1 signals or source files are bundled.
+Aligned bases in saved mappings can still encompass entire inputs.
+
+The summary response now includes a top-level `snapshot_sha256` over **both**
+`reads` and `summary`. It is distinct from the summary-only digest. Export via
+`GET /api/sequence-revisions/{id}/sanger-report?expected_snapshot={snapshot_sha256}&format=json`
+(or `format=html`). The server captures one database view and rejects a changed
+snapshot with HTTP 409. Reopen the construct to inspect the new state before
+exporting; previously downloaded snapshots remain unchanged. Closing or switching
+constructs cancels delivery of pending downloads.
+
+The digest is SHA-256 over UTF-8 JSON of `{reads,summary}`, with sorted keys,
+compact separators and `ensure_ascii=False`; it excludes export time and the
+outer digest itself. The export records that method, full digest and timestamp.
+This is content integrity, not a signature or a biological validation verdict.
+It exports the latest run per read rather than every historical run. Use each
+read's historical report export when a different saved run is required.

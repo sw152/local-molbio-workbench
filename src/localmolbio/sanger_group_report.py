@@ -1,0 +1,56 @@
+"""Offline exports of the exact revision-scoped view, including excluded sources."""
+from datetime import datetime, timezone
+from hashlib import sha256
+from html import escape
+import json
+
+LIMITATIONS=[
+    'This snapshot contains the latest saved run per attached read at the time of viewing, not every historical run.',
+    'Geometric coverage includes low-quality and ambiguous aligned bases. Q20 paired-base coverage is reported separately.',
+    'Missing or invalid mappings and excluded alignments remain unassessed. Zero observed conflicts is not a whole-plasmid verdict.',
+    'Insertion/deletion conflicts are not evaluated. No consensus is generated.',
+    'Original AB1 files are not rechecked at export. Stored per-base analysis evidence is used when legacy quality arrays are absent.',
+    'No raw AB1 signals or original source files are included. Aligned read/reference bases in saved evidence can encompass entire inputs.',
+    'The digest checks snapshot content integrity; it is not a signature or proof of biological correctness.',
+]
+
+
+def snapshot_digest(view):
+    content={'reads':view['reads'],'summary':view['summary']}
+    return sha256(json.dumps(content,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode('utf-8')).hexdigest()
+
+
+def build_group_export(view):
+    return {'schema':'localmolbio.sanger-group-report','schema_version':1,
+            'exported_at':datetime.now(timezone.utc).isoformat(),
+            'snapshot_sha256':snapshot_digest(view),
+            'digest_method':'SHA-256 of UTF-8 JSON of {reads,summary}, sorted keys, compact separators, ensure_ascii=false',
+            'snapshot':view,'source_verification_at_export':'not_performed','limitations':LIMITATIONS.copy()}
+
+
+def text(value):return escape(str(value)) if value is not None else 'Not recorded'
+
+
+def bar(parts,length,label):
+    blocks=''.join(f'<rect x="{a/length*1000}" y="4" width="{(b-a)/length*1000}" height="16" fill="{color}"/>' for a,b,color in parts)
+    return f'<svg viewBox="0 0 1000 24" preserveAspectRatio="none" role="img" aria-label="{text(label)}"><rect y="4" width="1000" height="16" fill="#e4e9f0"/>{blocks}</svg><div class="axis"><span>1 bp</span><span>{length:,} bp</span></div>'
+
+
+def render_group_html(payload):
+    snapshot=payload['snapshot'];s=snapshot['summary'];q=s['quality_review'];ref=s['reference'];length=ref['length_bp']
+    quality_sources={r['read_id']:r for r in q['source_runs']}
+    rows=''.join(f'<tr><td>{text(r["filename"])}<small>Read {text(r["read_id"])}</small></td><td>{text(r["run_number"])}<small>{text(r["alignment_id"])}</small></td><td>{"Included" if r["included"] else text(", ".join(reason.replace("_"," ") for reason in r["exclusion_reasons"]))}</td><td>{"Mapping validated" if quality_sources[r["read_id"]]["included"] else text(quality_sources[r["read_id"]]["reason"].replace("_"," "))}</td><td><code>{text(r["read_sha256"])}</code><small>Analysis reference SHA-256: {text(r["source_reference_sha256"])}</small></td></tr>' for r in s['source_runs'])
+    gaps=''.join(f'<tr><td>{" + ".join(f"{a+1:,}–{b:,}" for a,b in g["segments"])}{" · crosses origin" if g["wraps_origin"] else ""}</td><td>{g["length_bp"]:,} bp</td></tr>' for g in s['gap_regions'])
+    loci=''.join(f'<article class="locus"><h3>Reference {d["position"]+1:,} · {text(d["reference"])} <span>{"Conflicting calls" if d["conflict"] else "Non-reference call"}</span></h3><div class="scroll"><table><thead><tr><th>Read / run</th><th>Call</th><th>Phred</th><th>Original read base</th></tr></thead><tbody>'+''.join(f'<tr><td>{text(c["filename"])}<small>Run {c["run_number"]} · {text(c["alignment_id"])}</small></td><td>{text(c["base"])}</td><td>Q{c["phred"]}</td><td>{c["original_read_position"]+1}</td></tr>' for c in d['calls'])+'</tbody></table></div></article>' for d in q['differences'])
+    geometry=bar([(d['start'],d['end'],'#7168be' if d['depth']>1 else '#209788') for d in s['depth_segments']],length,'Geometric aligned reference coverage')
+    quality=bar([(a,b,'#209788') for a,b in q['reference_only_intervals']]+[(d['position'],d['position']+1,'#c58232') for d in q['differences']]+[(a,b,'#b74b72') for a,b in q['conflict_intervals']],length,'Q20 paired-base coverage and conflicts')
+    sources_empty='<tr><td colspan="5">No reads attached.</td></tr>'
+    gap_empty='<tr><td colspan="2">No geometric gaps. Quality and differences still require review.</td></tr>'
+    loci_empty='<p>No non-reference Q20+ calls observed among eligible mappings. Missing, excluded and low-quality evidence remains unassessed.</p>'
+    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>Sanger group evidence</title><style>
+*{{box-sizing:border-box}}body{{margin:0;background:#edf2f6;color:#1b3044;font:15px/1.6 system-ui,sans-serif}}main{{max-width:1120px;margin:32px auto;padding:36px;background:white;border:1px solid #d7e0e8;border-radius:18px}}h1{{font-size:32px;line-height:1.2;margin:12px 0}}h2{{font-size:21px;margin:0 0 14px}}h3{{font-size:15px}}header small{{letter-spacing:.15em;text-transform:uppercase;color:#487177}}section{{margin-top:30px;padding-top:24px;border-top:1px solid #dce4eb}}.warning{{background:#fff6e4;border-left:3px solid #b9862f;padding:12px 16px}}.meta,small{{color:#586e83;font-size:12px}}small{{display:block}}code,.meta{{overflow-wrap:anywhere}}.metrics{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:22px 0}}.metrics>div{{background:#f1f6f7;border:1px solid #d9e6e8;border-radius:10px;padding:16px}}.metrics b{{display:block;font-size:26px;color:#176d67}}.metrics span{{font-size:12px}}.metrics .conflicts b{{color:#a34363}}svg{{display:block;width:100%;height:28px}}.axis{{display:flex;justify-content:space-between;font-size:11px;color:#536a80}}table{{border-collapse:collapse;width:100%;font-size:12px}}th,td{{padding:11px;text-align:left;vertical-align:top;border-bottom:1px solid #dce4eb}}th{{color:#48657c}}.scroll{{overflow-x:auto}}.sources table{{min-width:780px;table-layout:fixed}}.sources td code{{font-size:10px;word-break:break-all}}.sources td{{overflow-wrap:anywhere}}.locus{{border:1px solid #d5dce7;border-radius:10px;padding:16px;margin:14px 0}}.locus h3{{display:flex;justify-content:space-between;gap:12px}}.locus h3 span{{color:#a34363}}details{{margin-top:22px}}summary{{cursor:pointer}}pre{{white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.5 ui-monospace,monospace;background:#f4f7fa;padding:14px}}li{{margin:8px 0}}@media(max-width:650px){{main{{margin:0;padding:20px;border-radius:0}}h1{{font-size:27px}}.metrics{{grid-template-columns:repeat(2,minmax(0,1fr))}}.metrics b{{font-size:23px}}.locus{{padding:12px}}.locus h3{{display:block}}.locus h3 span{{display:block}}}}@media print{{body{{background:white}}main{{border:0;margin:0;max-width:none;padding:0}}.scroll{{overflow:visible}}.sources table{{min-width:0}}details{{display:none}}section,.locus{{break-inside:avoid}}}}
+</style></head><body><main><header><small>MolBio Workbench · revision snapshot</small><h1>Sanger group evidence</h1><p>{text(ref.get('label',ref['id']))} · {length:,} bp · {text(ref['topology'])}</p><p class="meta">Revision {text(ref['id'])}<br>Reference SHA-256 {text(ref['sha256'])}<br>Snapshot SHA-256 {text(payload['snapshot_sha256'])}<br>Exported {text(payload['exported_at'])}</p><p class="warning">Latest saved runs in this snapshot. Local read evidence; no whole-plasmid verification verdict.</p></header>
+<section><h2>Geometric coverage</h2><div class="metrics"><div><b>{s['covered_fraction']*100:.1f}%</b><span>{s['covered_bases']:,} / {length:,} bp aligned</span></div><div><b>{s['uncovered_bases']:,}</b><span>Uncovered bases</span></div><div><b>{s['overlap_bases']:,}</b><span>Overlapping bases</span></div><div><b>{s['included_read_count']} / {len(s['source_runs'])}</b><span>Reads included</span></div></div>{geometry}<p class="meta">Teal: one read. Violet: multiple reads. Grey: uncovered. This track is not quality-screened.</p><h3>Uncovered regions · 1-based inclusive</h3><div class="scroll"><table><thead><tr><th>Reference interval</th><th>Length</th></tr></thead><tbody>{gaps or gap_empty}</tbody></table></div></section>
+<section><h2>Q20 coverage &amp; disagreements</h2><p>{'Paired-base review' if q['assessment']=='paired_bases_only' else 'Not evaluated'} · {q['included_read_count']} validated mappings · {q['excluded_read_count']} excluded</p><div class="metrics"><div><b>{q['callable_bases']:,}</b><span>Q20+ supported bases</span></div><div><b>{q['overlap_bases']:,}</b><span>Two or more Q20+ calls</span></div><div><b>{q['non_reference_position_count']}</b><span>Non-reference positions</span></div><div class="conflicts"><b>{q['conflict_position_count']}</b><span>Conflicting positions</span></div></div>{quality}<p class="meta">Teal: reference-agreeing only. Amber: non-reference. Rose: conflicting calls. Single-base marks preserve their true reference width. Grey: outside Q20 coverage.</p>{loci or loci_empty}<p class="meta">Reference and original-read positions above are 1-based. Calls are in reference orientation. Indel conflicts are not evaluated; agreeing on an alternate base is not a conflict between reads.</p></section>
+<section class="sources"><h2>Every source · included and excluded</h2><p class="meta">Scroll sideways on small screens for complete run identities, exclusion reasons and input hashes. Machine-readable reason codes remain in the full snapshot below.</p><div class="scroll" tabindex="0"><table><thead><tr><th>Read</th><th>Saved run</th><th>Geometric inclusion</th><th>Quality review</th><th>Source hashes</th></tr></thead><tbody>{rows or sources_empty}</tbody></table></div></section>
+<section><h2>Interpretation limits</h2><ul>{''.join(f'<li>{text(item)}</li>' for item in payload['limitations'])}</ul><details><summary>Full snapshot · analysis parameters, differences, mappings and source identities</summary><pre>{text(json.dumps(snapshot,indent=2,ensure_ascii=False))}</pre></details><p class="meta">{text(payload['digest_method'])}. Independent of export time. Download JSON for machine-readable evidence. This HTML uses no scripts or external resources.</p></section></main></body></html>'''

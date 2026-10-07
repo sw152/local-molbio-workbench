@@ -28,6 +28,7 @@
     return data;
   }
   function controls() {
+    el('sanger-summary').querySelectorAll('[data-group-export]').forEach(b=>b.disabled=busy||!state?.groupHash);
     el('sanger-upload-button').disabled = busy || !state;
     el('sanger-file').disabled = busy || !state;
     el('sanger-direction').disabled = busy || !state;
@@ -88,6 +89,23 @@
     }).join(''):'<div class="read-empty"><span>＋</span><b>No reads attached to this revision</b><p>Add an AB1 chromatogram to review its sequence evidence.</p></div>';
     controls();
   }
+  el('sanger-summary').addEventListener('click',async event=>{
+    const button=event.target.closest('[data-group-export]');
+    if(!button||!state?.groupHash||busy)return;
+    const token=generation,hash=state.groupHash,id=state.id,format=button.dataset.groupExport;
+    busy=true;controls();status('Preparing this group snapshot…');
+    try{
+      const response=await fetch(`/api/sequence-revisions/${encodeURIComponent(id)}/sanger-report?expected_snapshot=${hash}&format=${format}`);
+      if(!response.ok){let detail;try{detail=(await response.json()).detail;}catch{}throw new Error(typeof detail==='string'?detail:`Export failed (${response.status})`);}
+      const blob=await response.blob();
+      if(token!==generation||state?.groupHash!==hash)return;
+      const url=URL.createObjectURL(blob),link=document.createElement('a');
+      link.href=url;link.download=`sanger-group-${hash.slice(0,16)}.${format}`;
+      document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
+      status(`Group ${format.toUpperCase()} snapshot download started.`);
+    }catch(error){if(token===generation)status(`Could not export group: ${error.message}`,true);}
+    finally{if(token===generation){busy=false;controls();}}
+  });
   el('sanger-reads').addEventListener('click',async event=>{
     const button=event.target.closest('[data-report-export]');
     if(!button||!state||busy)return;
@@ -131,8 +149,9 @@
   });
   async function refresh(token) {
     window.sangerSummary.clear();
+    state.groupHash=null;
     const result = await request(`/api/sequence-revisions/${encodeURIComponent(state.id)}/sanger-reads?include_summary=true`);
-    if (token === generation) { render(result.reads); window.sangerSummary.render(result.summary); }
+    if (token === generation) { state.groupHash=result.snapshot_sha256; render(result.reads); window.sangerSummary.render(result.summary); controls(); }
   }
   async function open(id, length) {
     clear();

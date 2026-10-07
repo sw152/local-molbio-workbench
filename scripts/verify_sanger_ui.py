@@ -394,6 +394,77 @@ try:
         expect(high_card.locator('.base-mapping')).to_have_count(0)
         high_card.get_by_role('button',name='Show latest report').click()
         expect(high_card.locator('.base-mapping')).to_have_count(1)
+        # Group exports bind the displayed view and preserve all latest source runs.
+        page.route('**/sanger-report?*',lambda route:route.fulfill(status=503,content_type='application/json',body=json.dumps({'detail':'Simulated group export outage'})),times=1)
+        page.get_by_role('button',name='Group HTML',exact=True).click()
+        expect(page.locator('#sanger-status')).to_contain_text('Could not export group')
+        expect(page.get_by_role('button',name='Group HTML',exact=True)).to_be_enabled()
+        with page.expect_download() as group_json:
+            page.get_by_role('button',name='Group JSON',exact=True).click()
+        group_json_path=artifacts/'sanger-group.json';group_json.value.save_as(str(group_json_path))
+        group_payload=json.loads(group_json_path.read_text())
+        assert group_payload['schema']=='localmolbio.sanger-group-report'
+        group_snapshot=group_payload['snapshot']
+        assert group_snapshot['summary']['quality_review']['conflict_position_count']==1
+        assert group_snapshot['summary']['quality_review']['callable_bases']==770
+        assert next(r for r in group_snapshot['reads'] if r['original_filename']==read_path.name)['run_number']==6
+        with page.expect_download() as group_html:
+            page.get_by_role('button',name='Group HTML',exact=True).click()
+        group_html_path=artifacts/'sanger-group.html';group_html.value.save_as(str(group_html_path))
+        group_offline=browser.new_context(offline=True,viewport={'width':1200,'height':1000})
+        group_page=group_offline.new_page();group_requests=[];group_errors=[]
+        group_page.on('request',lambda request:group_requests.append(request.url))
+        group_page.on('pageerror',lambda error:group_errors.append(str(error)))
+        group_page.goto(group_html_path.as_uri())
+        expect(group_page.locator('h1')).to_have_text('Sanger group evidence')
+        expect(group_page.locator('header')).to_contain_text(group_payload['snapshot_sha256'])
+        expect(group_page.locator('.locus')).to_contain_text('Reference 191')
+        expect(group_page.locator('.locus')).to_contain_text('Q40')
+        expect(group_page.locator('.sources')).to_contain_text(read_path.name)
+        group_page.screenshot(path=str(artifacts/'group-export-desktop.png'))
+        group_page.locator('.locus').scroll_into_view_if_needed()
+        group_page.screenshot(path=str(artifacts/'group-export-conflict.png'))
+        group_page.set_viewport_size({'width':390,'height':844})
+        group_page.evaluate('window.scrollTo(0,0)')
+        group_page.evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
+        group_page.screenshot(path=str(artifacts/'group-export-mobile.png'))
+        group_page.locator('.sources').scroll_into_view_if_needed()
+        group_page.locator('.sources .scroll').evaluate('(el)=>{el.scrollLeft=el.scrollWidth;}')
+        group_page.evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
+        group_page.screenshot(path=str(artifacts/'group-export-mobile-sources.png'))
+        assert group_page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+        assert not group_errors and not any(url.startswith(('http:','https:')) for url in group_requests)
+        group_offline.close()
+        # A new server-side run invalidates the open snapshot, not the downloaded file.
+        high_saved=next(r for r in group_snapshot['reads'] if r['original_filename']==high_path.name)
+        updated=httpx.post(base+'/api/sanger-verifications',json={'sequencing_read_id':high_saved['id'],'previous_alignment_id':high_saved['alignment_id']})
+        assert updated.status_code==201,updated.text
+        page.get_by_role('button',name='Group JSON',exact=True).click()
+        expect(page.locator('#sanger-status')).to_contain_text('Group evidence changed')
+        page.locator('#close-map').click();page.get_by_role('button',name='Open map').click()
+        expect(high_card.locator('.analysis-version')).to_contain_text('Run 2 · Latest')
+        with page.expect_download() as refreshed_group:
+            page.get_by_role('button',name='Group JSON',exact=True).click()
+        refreshed_path=artifacts/'sanger-group-refreshed.json';refreshed_group.value.save_as(str(refreshed_path))
+        refreshed=json.loads(refreshed_path.read_text())
+        assert refreshed['snapshot_sha256']!=group_payload['snapshot_sha256']
+        assert next(r for r in refreshed['snapshot']['reads'] if r['id']==high_saved['id'])['run_number']==2
+        # Closing the view cancels a late group download.
+        group_pending=[];group_late=[]
+        page.route('**/sanger-report?*',lambda route:group_pending.append(route),times=1)
+        page.on('download',lambda download:group_late.append(download))
+        page.get_by_role('button',name='Group JSON',exact=True).click()
+        for _ in range(30):
+            if group_pending:break
+            page.wait_for_timeout(20)
+        assert group_pending
+        page.locator('#close-map').click()
+        with page.expect_response('**/sanger-report?*'):
+            group_pending[0].fulfill(status=200,content_type='application/json',body=json.dumps(refreshed))
+        page.evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
+        assert not group_late
+        page.get_by_role('button',name='Open map').click()
+        expect(high_card.locator('.analysis-version')).to_contain_text('Run 2 · Latest')
         # A failed list request must be shown, not reported as an empty library.
         page.locator('#close-map').click()
         page.route('**/api/sequence-revisions/*/sanger-reads*', lambda route: route.abort())
@@ -402,7 +473,7 @@ try:
         expect(page.locator('#sanger-summary')).to_be_empty()
         assert not errors, errors
         browser.close()
-    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['quality-filtered multi-read overlap, conflict and original peak navigation','base-level Q20 mapping, reverse original coordinates and historical absence','high-quality difference shown separately from matching evidence','latest-only multi-read coverage, overlap and circular gap review','binary ABIF upload','invalid and duplicate upload','analysis and persisted evidence','append-only rerun and historical report switching','six-run history pagination','optional end trimming with original and retained coverage','historical and current JSON/HTML downloads','offline HTML rendering without external requests','export failure recovery and late-response cancellation','reverse trimmed variant and boundary jump to original peaks','history network failure and stale rerun recovery','Q12 variant and focused chromatogram','desktop and mobile layouts','network failure','no JS exceptions']},indent=2))
+    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['group JSON/HTML downloads, offline rendering, stale snapshot rejection and late-response cancellation','quality-filtered multi-read overlap, conflict and original peak navigation','base-level Q20 mapping, reverse original coordinates and historical absence','high-quality difference shown separately from matching evidence','latest-only multi-read coverage, overlap and circular gap review','binary ABIF upload','invalid and duplicate upload','analysis and persisted evidence','append-only rerun and historical report switching','six-run history pagination','optional end trimming with original and retained coverage','historical and current JSON/HTML downloads','offline HTML rendering without external requests','export failure recovery and late-response cancellation','reverse trimmed variant and boundary jump to original peaks','history network failure and stale rerun recovery','Q12 variant and focused chromatogram','desktop and mobile layouts','network failure','no JS exceptions']},indent=2))
 finally:
     server.terminate()
     server.wait(timeout=10)
