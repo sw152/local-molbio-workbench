@@ -151,9 +151,29 @@ design job and pair index, and unlinked legacy candidates are not guessed into p
 Mobile diagrams scroll horizontally. Older candidates without site evidence are
 marked as not reviewed.
 
-**Specificity is not established** by this scan. Mismatch binding, other references,
-alternative PCR products and whole-genome specificity are not evaluated; these are
-design candidates, not experimentally validated primers.
+New designs also enumerate exact, inward-facing, non-overlapping site pairs using
+one of each oligo, in both F→/←R and R→/←F assignments. The search uses the requested
+product size range (inclusive), and circular intervals traverse the reference at
+most once. Products are deduplicated by reference start and span, with primer
+assignments retained. The intended interval and additional intervals are displayed
+with coordinate bars, directions and lengths. Unknown topology leaves the origin
+unchecked. This product review can detect origin-crossing alternatives even though
+primer design itself still uses linear coordinates.
+
+If either stored binding-site list was truncated, product counts are explicitly
+lower bounds and total/alternative counts remain null; no absence claim is made.
+Up to 100 product intervals are stored, with the intended interval first when
+found. When only this output list is truncated, complete counts are still retained.
+Saved metrics, job parameters and selected-primer CSV retain the review scope,
+size range and completeness. Historical candidates are not silently reanalyzed.
+
+**Specificity is not established** by these checks. Mismatch binding, overlapping
+sites, same-oligo pairs, other product sizes, other references and whole-genome
+specificity are not evaluated. These are geometric candidates, not predictions of
+amplification success or experimentally validated primers.
+The strand and primer-inclusive size conventions follow the basic description in
+[UCSC In-Silico PCR](https://genome.ucsc.edu/cgi-bin/hgPcr); this workbench uses its
+own bounded exact-match implementation and does not run UCSC software.
 
 Run `python scripts/verify_primer_ui.py` to check target entry, actual Primer3
 execution on synthetic data, selection, CSV export and persisted target metadata.

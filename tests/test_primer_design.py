@@ -48,6 +48,11 @@ def test_pcr_primer_design_persists_candidates_and_job(tmp_path, monkeypatch) ->
         assert len(body["pairs"]) >= 1
         assert len(body["primers"]) == len(body["pairs"]) * 2
         assert body["primers"][0]["name"] == "demo-F1"
+        for pair in body["pairs"]:
+            review=pair["product_review"]
+            assert review["total_product_count"]==1
+            assert review["alternative_product_count"]==0
+            assert review["products"][0]["is_intended"]
         for item in body["primers"]:
             sites = item["metrics"]["reference_sites"]
             assert sites["total_directional_matches"] == 1
@@ -99,6 +104,11 @@ def test_pcr_primer_design_persists_candidates_and_job(tmp_path, monkeypatch) ->
         assert target_row["target_end_1_based_inclusive"] == "850"
         assert target_row["specificity_status"] == "not_evaluated"
         assert target_row["reference_exact_directional_matches"] == "1"
+        assert target_row["pair_product_site_search_complete"] == "True"
+        assert target_row["pair_alternative_products_in_range"] == "0"
+        assert target_row["pair_review_product_min_bp"] == "300"
+        assert target_row["pair_review_product_max_bp"] == "500"
+        assert matching[0]["metrics"]["product_review"] == evidence["pairs"][0]["product_review"]
         assert target_row["reference_site_review_method"] == "full_length_exact_match_v1"
         assert matching[0]["metrics"]["reference_sites"]["scope"] == "current_reference_only"
         invalid = client.post("/api/primer-designs",json={"sequence_revision_id":revision_id,"target_start":650})

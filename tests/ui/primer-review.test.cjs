@@ -17,3 +17,12 @@ test('diagram expresses true window coordinates, target and opposing arrows',()=
  assert.match(svg,/60,103 179,103 188,112/);assert.match(svg,/700,103 581,103 572,112/);
  assert.match(svg,/>110<\/text>/);assert.doesNotMatch(svg,/NaN|undefined/);
 });
+
+const {productReview}=require('../../src/localmolbio/static/primer-review.js');
+test('missing or truncated evidence never claims no alternative products',()=>{
+ const pair={left:{metrics:{}}};assert.match(productReview(pair),/not recorded/);
+ pair.left.metrics.product_review={site_search_complete:false,observed_alternative_count:0,observed_product_count:0,product_size_min:100,product_size_max:800,products:[]};
+ const html=productReview(pair);assert.match(html,/Incomplete site search/);assert.doesNotMatch(html,/No additional product/);
+ pair.left.metrics.product_review.site_search_complete=true;
+ assert.match(productReview(pair),/No additional product interval found in this range/);
+});
