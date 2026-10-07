@@ -77,6 +77,8 @@ app = FastAPI(
 )
 from .input_jobs_api import router as input_jobs_router
 app.include_router(input_jobs_router)
+from .fastq_api import router as fastq_router
+app.include_router(fastq_router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

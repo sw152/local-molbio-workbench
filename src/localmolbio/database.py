@@ -176,6 +176,8 @@ def initialise(path: Path | None = None) -> None:
         connection.executescript(SCHEMA)
         from .job_queue import SCHEMA as QUEUE_SCHEMA
         connection.executescript(QUEUE_SCHEMA)
+        from .fastq_inputs import SCHEMA as FASTQ_SCHEMA
+        connection.executescript(FASTQ_SCHEMA)
         _add_column_if_missing(connection, "sequencing_reads", "qualities_json TEXT NOT NULL DEFAULT '[]'")
         _add_column_if_missing(connection, "sanger_alignments", "evidence_json TEXT NOT NULL DEFAULT '{}'")
         # Additive migration: retain legacy rows and preserve their IDs, jobs and evidence.

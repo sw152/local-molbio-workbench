@@ -357,3 +357,11 @@ The construct view now includes an **Input integrity checks** panel: select atta
 AB1 reads, queue a check, refresh status, inspect paginated attempts and cancel a
 pending check. A separately invoked local worker performs the checks. Successful
 checks do not imply sequence analysis or plasmid correctness. See [task API and UI](docs/input-check-ui.zh-CN.md).
+
+## FASTQ registration foundation
+
+Revision-scoped FASTQ / FASTQ.gz registration now preserves original bytes and
+computes bounded streaming format, read-length and quality summaries. Uploads
+require an explicit Phred+33 declaration; encoding, paired reads and sequencing
+platform are not inferred. This API does not perform alignment or consensus,
+and the FASTQ upload UI is still pending. See [format support, API and limits](docs/fastq-inputs.zh-CN.md).
