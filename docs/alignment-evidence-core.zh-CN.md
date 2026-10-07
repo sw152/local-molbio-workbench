@@ -1,6 +1,6 @@
 # 受限 minimap2 比对证据核心
 
-本模块实际执行 minimap2，读取 PAF，并依据输入序列逐碱基校验 CIGAR 后产生可追溯的局部比对证据。它是后续 FASTQ 分析适配器的内部核心，现在已通过 [登记 FASTQ 比对任务](registered-fastq-alignment.zh-CN.md) 接入独立输入快照和队列 CLI；提交 API 和 UI 尚未实现。输入为显式提供的参考字符串与读段字符串列表，不接受随意的命令行参数，不在安装包中捆绑第三方可执行程序。
+本模块实际执行 minimap2，读取 PAF，并依据输入序列逐碱基校验 CIGAR 后产生可追溯的局部比对证据。它是后续 FASTQ 分析适配器的内部核心，现在已通过 [登记 FASTQ 比对任务](registered-fastq-alignment.zh-CN.md) 接入独立输入快照和队列 CLI；已连接提交 API、局部证据 UI 与离线报告。输入为显式提供的参考字符串与读段字符串列表，不接受随意的命令行参数，不在安装包中捆绑第三方可执行程序。
 
 ## 固定工具与运行范围
 
@@ -44,4 +44,4 @@ MOLBIO_MINIMAP2="$PWD/var/tools/minimap2-v2.31/minimap2" python -m pytest -q tes
 
 已包含四种显式预设、正反向/线性末端、未报告命中、圆形跨起点和副本去重、真实重复区域、多重命中、已知错配/插入/缺失/N、局部 overhang，以及独立解析的 N-gap 分母、非法输出、超时、输出超限和取消。进程控制失败测试使用短小替身程序，科学比对用例实际运行上述工具，两者不混称。
 
-登记 FASTQ 的有限规模快照、文件/记录序号映射及受租约约束的队列执行已完成，详见 [登记比对任务](registered-fastq-alignment.zh-CN.md)。下一步增加结果审阅 API/UI 与覆盖证据；超出限制不能以截取前缀冒充完整分析。
+登记 FASTQ 的有限规模快照、文件/记录序号映射及受租约约束的队列执行已完成，详见 [登记比对任务](registered-fastq-alignment.zh-CN.md)。现有结果审阅见 [比对 UI](alignment-ui.zh-CN.md)，安装和环境检查见 [本地入口](local-entrypoint.zh-CN.md)；超出限制不能以截取前缀冒充完整分析。

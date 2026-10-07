@@ -11,11 +11,13 @@ Python 3.11 or later is recommended. The prototype also supports Python 3.9+.
 ```bash
 python -m venv .venv
 . .venv/bin/activate
-pip install -e '.[dev]'
-uvicorn localmolbio.api:app --host 127.0.0.1 --port 8000
+python -m pip install .
+export MOLBIO_DATA_DIR="/absolute/path/to/molbio-data"
+molbio doctor
+molbio serve --port 8000
 ```
 
-Open `http://127.0.0.1:8000` in a browser. Runtime data is stored in `./var` by default; set `MOLBIO_DATA_DIR` to choose another location.
+Replace the data path with your chosen storage location, then open `http://127.0.0.1:8000`. The new entry point requires an explicit data directory and starts no workers automatically. Existing direct uvicorn commands retain their previous `./var` default. See [setup, diagnostics and bounded task execution](docs/local-entrypoint.zh-CN.md). For development, install `-e ".[dev]"` instead.
 
 ## Workstation deployment
 

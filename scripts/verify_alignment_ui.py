@@ -7,6 +7,7 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from playwright.sync_api import sync_playwright,expect
 ROOT=Path(__file__).resolve().parents[1]
+APP_PYTHON=os.environ.get('MOLBIO_VERIFY_PYTHON',sys.executable)
 artifacts=ROOT/'var'/'alignment-ui-check'/time.strftime('%Y%m%d-%H%M%S');artifacts.mkdir(parents=True)
 if not os.environ.get('MOLBIO_MINIMAP2'):raise RuntimeError('Configure the pinned real minimap2 for this check')
 rng=random.Random(617);ref=''.join(rng.choice('ACGT') for _ in range(900))
@@ -23,9 +24,9 @@ fastq=artifacts/'synthetic_long_filename_for_alignment_provenance.fastq';fastq.w
 with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
 base=f'http://127.0.0.1:{port}';log=(artifacts/'server.log').open('w')
 env=dict(os.environ,MOLBIO_DATA_DIR=str(artifacts/'runtime'))
-server=subprocess.Popen([sys.executable,'-m','uvicorn','localmolbio.api:app','--host','127.0.0.1','--port',str(port)],cwd=ROOT,env=env,stdout=log,stderr=log)
+server=subprocess.Popen([APP_PYTHON,'-m','localmolbio','serve','--port',str(port)],cwd=ROOT,env=env,stdout=log,stderr=log)
 def worker():
-    r=subprocess.run([sys.executable,'-m','localmolbio.worker','once','--adapter','alignment'],cwd=ROOT,env=env,capture_output=True,text=True)
+    r=subprocess.run([APP_PYTHON,'-m','localmolbio','work','--adapter','alignment'],cwd=ROOT,env=env,capture_output=True,text=True)
     assert r.returncode==0,(r.stdout,r.stderr)
     assert json.loads(r.stdout)['status']=='succeeded'
 try:
@@ -220,7 +221,7 @@ try:
         r=page.request.post(endpoint,data={'input_ids':[input_id],'data_type':'ont-high-accuracy','idempotency_key':'history','max_attempts':10})
         assert r.status==201,r.text();history=r.json()['id']
         command='from localmolbio import job_queue as q; from localmolbio.fastq_alignment import ADAPTER\nfor _ in range(4):\n c=q.claim("history-test",ADAPTER); q.fail(c["job_id"],c["lease_token"],"retry",True)\n'
-        subprocess.run([sys.executable,'-c',command],cwd=ROOT,env=env,check=True)
+        subprocess.run([APP_PYTHON,'-c',command],cwd=ROOT,env=env,check=True)
         panel.locator('[data-aj-refresh]').click();expect(status).to_contain_text('refreshed')
         panel.locator(f'[data-aj-detail="{history}"]').click()
         expect(panel.locator('.aj-details ol li')).to_have_count(3)
@@ -253,7 +254,7 @@ try:
         panel.scroll_into_view_if_needed();page.screenshot(path=str(artifacts/'alignment-empty-mobile.png'))
         assert not errors,errors
         browser.close()
-    (artifacts/'result.json').write_text(json.dumps({'passed':True,'real_minimap2':True,'synthetic_only':True,'checks':['explicit type','lost response idempotency','real worker','forward/reverse/circular origin evidence','real deletion remains a diagram gap','multi-traversal withheld is distinct from no hit','read/job/input/attempt pagination','cross-page selection','cancel','refresh failure recovery','late detail and submission revision isolation','mobile overflow','coverage composition and overlapping deletion evidence','coverage filter and failure recovery','region read navigation, pagination and original provenance','paired versus deletion filters and refresh persistence','failed filter preserves committed evidence','mobile focused review and return to overview','complete HTML and JSON downloads from filtered page','standalone report desktop/mobile/print and no network assets','report failure preserves evidence','late report does not download after revision switch','late filtered response revision isolation'],'screenshots':[p.name for p in artifacts.glob('*.png')]},indent=2))
+    (artifacts/'result.json').write_text(json.dumps({'passed':True,'real_minimap2':True,'synthetic_only':True,'app_python':APP_PYTHON,'checks':['installed CLI serve/work','explicit type','lost response idempotency','real worker','forward/reverse/circular origin evidence','real deletion remains a diagram gap','multi-traversal withheld is distinct from no hit','read/job/input/attempt pagination','cross-page selection','cancel','refresh failure recovery','late detail and submission revision isolation','mobile overflow','coverage composition and overlapping deletion evidence','coverage filter and failure recovery','region read navigation, pagination and original provenance','paired versus deletion filters and refresh persistence','failed filter preserves committed evidence','mobile focused review and return to overview','complete HTML and JSON downloads from filtered page','standalone report desktop/mobile/print and no network assets','report failure preserves evidence','late report does not download after revision switch','late filtered response revision isolation'],'screenshots':[p.name for p in artifacts.glob('*.png')]},indent=2))
     print(json.dumps({'artifacts':str(artifacts),'passed':True}))
 finally:
     server.terminate();server.wait(timeout=10);log.close()
