@@ -267,7 +267,8 @@ Each listed call retains its read/run identity, Phred and original AB1 coordinat
 its button opens that original chromatogram peak, including reverse-read positions.
 
 This is a paired-base review, not variant normalization or consensus generation.
-Insertion/deletion conflicts are **not evaluated**. Zero observed conflicts does
+Indel support has a separate, limited exact-event-versus-reference review below.
+Other indel alleles and repeat-shiftable events remain unassessed. Zero observed conflicts does
 not assess missing, excluded or low-quality evidence. Original files are not
 reopened for the summary; legacy stored quality arrays may be absent, in which
 case the saved per-base analysis evidence remains the quality source.
@@ -313,8 +314,27 @@ Deletion bases have no directly measured per-base Phred; flank quality must not
 be relabeled as deletion quality. Linear ends never acquire a fabricated
 opposite flank, and circular origin events preserve split reference segments.
 
-This is **event/anchor inspection only**. No event normalization or cross-read
-indel comparison is performed, and `indel_conflicts` remains `not_evaluated`.
-Passing these checks is not a variant-confidence score or a consensus verdict.
+Event/anchor inspection feeds the limited comparison described below. No event
+normalization is performed. Passing the anchor checks is not a variant-confidence
+score or a consensus verdict.
 The complete audit is included in group JSON and the HTML's full snapshot;
 original saved reports are not rewritten.
+
+## Compare exact indels with observed reference support
+
+Eligible events are grouped by kind, exact reference boundary and sequence.
+Each attached read contributes at most once per group: **event**, **reference**
+or **unassessed**. Reference support for an insertion requires its two adjacent
+reference flanks; for a deletion it requires every deleted reference base plus
+both flanks. Every compared call must match unambiguous reference bases at Q20+
+and advance consecutively in the original read (decreasing for reverse reads).
+An absent event in a report alone is never reference evidence.
+
+The group exposes `conflicting_support` when distinct eligible reads support the
+exact event and the reference span. It records source run IDs, original flanks,
+minimum reference-span quality and every unassessed reason. Different insertion
+sequences/other indel alleles are not counted as reference, and are not compared
+to one another. Repeat-shiftable, complex or inconsistent evidence stays withheld.
+The API marks this scope as `exact_event_vs_reference_only`; there is no event
+normalization, consensus or whole-plasmid pass verdict. UI source links open the
+original peaks, and group JSON/HTML exports retain the comparisons.

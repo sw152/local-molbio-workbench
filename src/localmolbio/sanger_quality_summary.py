@@ -3,6 +3,7 @@ from collections import defaultdict
 from hashlib import sha256
 from .sanger_mapping import build_base_mapping, intervals
 from .sanger_indel_review import review_indels
+from .sanger_indel_comparison import compare_indels
 
 COMPLEMENT=str.maketrans('ACGTN','TGCAN')
 
@@ -64,7 +65,7 @@ def validated_columns(record, reference):
 
 def summarize_quality(reference, reference_sequence, records, source_runs):
     source_by_id={r['read_id']:r for r in source_runs}
-    sources=[];calls=defaultdict(list);indels=[]
+    sources=[];calls=defaultdict(list);indels=[];validated={}
     reference_valid=isinstance(reference_sequence,str) and len(reference_sequence)==reference['length_bp'] and sha256(reference_sequence.encode()).hexdigest()==reference['sha256']
     for record in records:
         source=source_by_id[record['id']]
@@ -76,6 +77,7 @@ def summarize_quality(reference, reference_sequence, records, source_runs):
         sources.append({'read_id':record['id'],'alignment_id':record.get('alignment_id'),
                         'filename':record['original_filename'],'included':reason is None,'reason':reason})
         if columns is None:continue
+        validated[record['id']]=columns
         indels.extend(review_indels(record,reference_sequence,reference['topology'],columns))
         for pos,original,ref,call,q in columns:
             if ref not in 'ACGT' or call not in 'ACGT' or q is None or q<20:continue
@@ -90,6 +92,9 @@ def summarize_quality(reference, reference_sequence, records, source_runs):
             item={'position':pos,'reference':reference_sequence[pos],'conflict':len(alleles)>1,'calls':evidence}
             differences.append(item)
             if item['conflict']:conflicts.append(pos)
+    comparisons=compare_indels(indels,records,validated,sources,reference_sequence,reference['topology']) if reference_valid else []
+    for event in indels:
+        event['cross_read_comparison']='see_indel_review_comparisons' if event['eligible_for_exact_anchor_review'] else 'not_evaluated'
     valid=sum(s['included'] for s in sources)
     overlap=sum(len(v)>=2 for v in calls.values())
     return {'schema_version':1,'method':'validated_q20_paired_base_review_v1','quality_threshold':20,
@@ -100,8 +105,10 @@ def summarize_quality(reference, reference_sequence, records, source_runs):
             'reference_only_bases':len(reference_only),'reference_only_intervals':intervals(reference_only),
             'non_reference_position_count':len(differences),'differences':differences,
             'conflict_position_count':len(conflicts),'conflict_intervals':intervals(conflicts),
-            'indel_conflicts':'not_evaluated','consensus':'not_generated',
+            'indel_conflicts':'exact_event_vs_reference_only' if comparisons else 'not_evaluated','consensus':'not_generated',
             'indel_review':{'method':'saved_event_q20_flank_audit_v1','events':indels,
                             'eligible_event_count':sum(e['eligible_for_exact_anchor_review'] for e in indels),
-                            'normalization':'not_performed','cross_read_comparison':'not_performed'},
+                            'normalization':'not_performed','cross_read_comparison':'exact_event_vs_reference_only' if comparisons else 'not_performed',
+                            'comparison_method':'q20_contiguous_span_event_vs_reference_v1','comparisons':comparisons,
+                            'conflicting_group_count':sum(c['conflicting_support'] for c in comparisons)},
             'source_files_rechecked':False,'whole_reference_verified':False}

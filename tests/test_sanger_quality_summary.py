@@ -118,7 +118,7 @@ def test_api_quality_summary_does_not_return_full_inputs(ready):
 
 @pytest.mark.parametrize('kind',['insertion','deletion'])
 @pytest.mark.parametrize('reverse',[False,True])
-def test_indels_preserve_paired_quality_coverage_without_claiming_indel_review(kind,reverse):
+def test_indels_preserve_paired_coverage_with_only_scoped_indel_review(kind,reverse):
     a=read('a');calls=SEQ[40:160]+('AAA' if kind=='insertion' else '')+SEQ[163 if kind=='deletion' else 160:300]
     if reverse:calls=str(Seq(calls).reverse_complement())
     a['base_sequence']=calls;a['qualities']=[35]*len(calls)
@@ -127,7 +127,10 @@ def test_indels_preserve_paired_quality_coverage_without_claiming_indel_review(k
     q=summary([a]);assert q['included_read_count']==1
     expected=a['report']['evidence']['reference_covered_intervals']
     assert q['callable_intervals']==expected and q['callable_bases']==a['report']['aligned_bases']
-    assert q['conflict_position_count']==0 and q['indel_conflicts']=='not_evaluated'
+    assert q['conflict_position_count']==0 and q['indel_conflicts']=='exact_event_vs_reference_only'
+    comparison=q['indel_review']['comparisons'][0]
+    assert comparison['event_read_count']==1 and comparison['reference_read_count']==0
+    assert not comparison['conflicting_support'] and comparison['alternative_indel_alleles']=='not_compared'
 
 def test_mixed_legacy_mapping_is_not_silently_assessed():
     a,b=read('a'),read('b',120,320,mutate=70)

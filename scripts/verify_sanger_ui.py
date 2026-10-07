@@ -480,7 +480,18 @@ try:
         expect(page.locator('.indel-event')).to_contain_text('insertion · 3 bp')
         expect(page.locator('.indel-event')).to_contain_text('Flanks meet checks')
         expect(page.locator('.indel-event')).to_contain_text('Reference boundary after 650')
-        expect(page.locator('.indel-review')).to_contain_text('not normalized or compared across reads')
+        expect(page.locator('.indel-review')).to_contain_text('compared only with explicitly observed reference spans')
+        comparison=page.locator('.indel-comparison')
+        expect(comparison).to_have_count(1)
+        expect(comparison).to_contain_text('Conflicting event / reference support')
+        expect(comparison.locator('.indel-support-counts')).to_contain_text('1Event-supporting reads')
+        expect(comparison.locator('.indel-support-counts')).to_contain_text('2Reference-supporting reads')
+        expect(comparison.locator('.indel-support-counts')).to_contain_text('1Unassessed reads')
+        expect(comparison.locator('li').filter(has_text=high_path.name)).to_contain_text('not fully observed')
+        comparison.screenshot(path=str(artifacts/'indel-comparison-desktop.png'))
+        comparison.locator('li').filter(has_text=read_path.name).get_by_role('button',name='Left · read 500').click()
+        expect(page.locator('.read-card').filter(has_text=read_path.name).locator('.trace-selected')).to_have_attribute('data-peak-position','499')
+
         page.locator('.indel-event').screenshot(path=str(artifacts/'indel-anchors-desktop.png'))
         page.locator('.indel-flanks button').first.click()
         expect(indel_card.locator('.trace-selected')).to_have_attribute('data-peak-position','153')
@@ -489,12 +500,27 @@ try:
         page.evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
         page.screenshot(path=str(artifacts/'indel-anchors-mobile.png'))
         assert page.locator('.indel-event').evaluate('(el)=>el.scrollWidth<=el.clientWidth+1')
+        comparison.evaluate('(el)=>el.scrollIntoView({block:"start"})')
+        page.screenshot(path=str(artifacts/'indel-comparison-mobile.png'))
+        assert comparison.evaluate('(el)=>el.scrollWidth<=el.clientWidth+1')
         with page.expect_download() as indel_export:
             page.get_by_role('button',name='Group JSON',exact=True).click()
         indel_export_path=artifacts/'indel-group.json';indel_export.value.save_as(str(indel_export_path))
         exported_events=json.loads(indel_export_path.read_text())['snapshot']['summary']['quality_review']['indel_review']['events']
         assert len(exported_events)==1 and exported_events[0]['eligible_for_exact_anchor_review']
         assert exported_events[0]['original_read_positions']==[152,151,150]
+        group_evidence=json.loads(indel_export_path.read_text())['snapshot']['summary']['quality_review']
+        assert group_evidence['indel_conflicts']=='exact_event_vs_reference_only'
+        assert group_evidence['indel_review']['comparisons'][0]['reference_read_count']==2
+        with page.expect_download() as indel_html:
+            page.get_by_role('button',name='Group HTML',exact=True).click()
+        indel_html_path=artifacts/'indel-comparison.html';indel_html.value.save_as(str(indel_html_path))
+        indel_offline=browser.new_context(offline=True,viewport={'width':1100,'height':1000})
+        indel_page=indel_offline.new_page();indel_page.goto(indel_html_path.as_uri())
+        expect(indel_page.locator('.indel-comparison-report')).to_contain_text('1 event / 2 reference / 1 unassessed')
+        indel_page.locator('.indel-comparison-report').screenshot(path=str(artifacts/'indel-comparison-offline.png'))
+        indel_offline.close()
+
         # A failed list request must be shown, not reported as an empty library.
         page.locator('#close-map').click()
         page.route('**/api/sequence-revisions/*/sanger-reads*', lambda route: route.abort())
@@ -503,7 +529,7 @@ try:
         expect(page.locator('#sanger-summary')).to_be_empty()
         assert not errors, errors
         browser.close()
-    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['grouped reverse insertion, Q20 flank audit, original peak jump and snapshot export','group JSON/HTML downloads, offline rendering, stale snapshot rejection and late-response cancellation','quality-filtered multi-read overlap, conflict and original peak navigation','base-level Q20 mapping, reverse original coordinates and historical absence','high-quality difference shown separately from matching evidence','latest-only multi-read coverage, overlap and circular gap review','binary ABIF upload','invalid and duplicate upload','analysis and persisted evidence','append-only rerun and historical report switching','six-run history pagination','optional end trimming with original and retained coverage','historical and current JSON/HTML downloads','offline HTML rendering without external requests','export failure recovery and late-response cancellation','reverse trimmed variant and boundary jump to original peaks','history network failure and stale rerun recovery','Q12 variant and focused chromatogram','desktop and mobile layouts','network failure','no JS exceptions']},indent=2))
+    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['exact indel vs reference support, unassessed short read, source peak links and offline group report','grouped reverse insertion, Q20 flank audit, original peak jump and snapshot export','group JSON/HTML downloads, offline rendering, stale snapshot rejection and late-response cancellation','quality-filtered multi-read overlap, conflict and original peak navigation','base-level Q20 mapping, reverse original coordinates and historical absence','high-quality difference shown separately from matching evidence','latest-only multi-read coverage, overlap and circular gap review','binary ABIF upload','invalid and duplicate upload','analysis and persisted evidence','append-only rerun and historical report switching','six-run history pagination','optional end trimming with original and retained coverage','historical and current JSON/HTML downloads','offline HTML rendering without external requests','export failure recovery and late-response cancellation','reverse trimmed variant and boundary jump to original peaks','history network failure and stale rerun recovery','Q12 variant and focused chromatogram','desktop and mobile layouts','network failure','no JS exceptions']},indent=2))
 finally:
     server.terminate()
     server.wait(timeout=10)
