@@ -25,6 +25,7 @@ from .importer import (
     ensure_initial_revisions,
     import_benchling_archive,
 )
+from .primer_sites import exact_reference_sites
 from .primer_design import PrimerDesignError, PrimerDesignSettings, design_pcr_primers
 import primer3
 from .sanger import SangerReadError, file_sha256, parse_ab1
@@ -316,6 +317,8 @@ def export_selected_primers(revision_id: str) -> Response:
             "target_start_1_based",
             "target_end_1_based_inclusive",
             "specificity_status",
+            "reference_exact_directional_matches",
+            "reference_site_review_method",
             "created_at",
         ],
     )
@@ -340,6 +343,8 @@ def export_selected_primers(revision_id: str) -> Response:
                 "target_start_1_based": target["start"] + 1 if "start" in target else "",
                 "target_end_1_based_inclusive": target.get("end", ""),
                 "specificity_status": metrics.get("specificity_status", "not_recorded"),
+                "reference_exact_directional_matches": metrics.get("reference_sites", {}).get("total_directional_matches", ""),
+                "reference_site_review_method": metrics.get("reference_sites", {}).get("method", "not_recorded"),
                 "created_at": row["created_at"],
             }
         )
@@ -380,6 +385,7 @@ def create_primer_design(request: PrimerDesignInput) -> dict[str, object]:
         if not revision:
             raise HTTPException(status_code=404, detail="Sequence revision not found")
         parameters["reference_topology"] = revision["topology"]
+        parameters["binding_site_review"] = "full_length_exact_match_v1"
         connection.execute(
             """
             INSERT INTO analysis_jobs (
@@ -398,6 +404,10 @@ def create_primer_design(request: PrimerDesignInput) -> dict[str, object]:
         )
     try:
         pairs = design_pcr_primers(revision["sequence_text"], settings)
+        for pair in pairs:
+            for side in ("left", "right"):
+                pair[side]["reference_sites"] = exact_reference_sites(
+                    revision["sequence_text"], pair[side]["sequence"], revision["topology"])
     except PrimerDesignError as exc:
         with connect() as connection:
             connection.execute(
@@ -432,6 +442,7 @@ def create_primer_design(request: PrimerDesignInput) -> dict[str, object]:
                     "gc_percent": item["gc_percent"],
                     "self_any_th": item["self_any_th"],
                     "self_end_th": item["self_end_th"],
+                    "reference_sites": item["reference_sites"],
                     "product_size": pair["product_size"],
                     "pair_index": pair["pair_index"],
                     "analysis_job_id": job_id,

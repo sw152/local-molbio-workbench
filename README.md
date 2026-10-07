@@ -96,8 +96,23 @@ circular records currently use their stored linear coordinates for primer design
 The API accepts optional `target_start` and `target_end` as a zero-based half-open
 interval. Saved candidates retain the target, design job, engine version and scope.
 Selected-primer CSV exports also include target coordinates, pair index, product
-length and specificity status. Specificity screening is **not yet evaluated**;
-these are design candidates, not experimentally validated primers.
+length, exact reference match count and specificity status. New designs retain an
+exact, full-length oligo scan on both strands of the current reference, including
+origin-crossing sites for circular records. Counts are directional: palindromic
+oligos can match both strands at one interval. The stored site list is capped at
+100 per oligo; the total count remains complete and truncation is explicit.
+Unknown topology is scanned as linear, with the origin marked unchecked.
+
+The pair review panel shows opposing primer arrows, the requested target and
+expected product at their actual reference coordinates. Its axis uses zero-based
+boundaries; site labels use one-based inclusive ranges. Pairs are associated by
+design job and pair index, and unlinked legacy candidates are not guessed into pairs.
+Mobile diagrams scroll horizontally. Older candidates without site evidence are
+marked as not reviewed.
+
+**Specificity is not established** by this scan. Mismatch binding, other references,
+alternative PCR products and whole-genome specificity are not evaluated; these are
+design candidates, not experimentally validated primers.
 
 Run `python scripts/verify_primer_ui.py` to check target entry, actual Primer3
 execution on synthetic data, selection, CSV export and persisted target metadata.

@@ -48,6 +48,12 @@ def test_pcr_primer_design_persists_candidates_and_job(tmp_path, monkeypatch) ->
         assert len(body["pairs"]) >= 1
         assert len(body["primers"]) == len(body["pairs"]) * 2
         assert body["primers"][0]["name"] == "demo-F1"
+        for item in body["primers"]:
+            sites = item["metrics"]["reference_sites"]
+            assert sites["total_directional_matches"] == 1
+            assert sites["sites"][0]["start"] == item["binding_start"]
+            assert sites["sites"][0]["end"] == item["binding_end"]
+            assert sites["sites"][0]["strand"] == (1 if item["direction"] == "forward" else -1)
 
         saved_primers = client.get(f"/api/revisions/{revision_id}/primers")
         assert saved_primers.status_code == 200
@@ -92,6 +98,9 @@ def test_pcr_primer_design_persists_candidates_and_job(tmp_path, monkeypatch) ->
         assert target_row["target_start_1_based"] == "651"
         assert target_row["target_end_1_based_inclusive"] == "850"
         assert target_row["specificity_status"] == "not_evaluated"
+        assert target_row["reference_exact_directional_matches"] == "1"
+        assert target_row["reference_site_review_method"] == "full_length_exact_match_v1"
+        assert matching[0]["metrics"]["reference_sites"]["scope"] == "current_reference_only"
         invalid = client.post("/api/primer-designs",json={"sequence_revision_id":revision_id,"target_start":650})
         assert invalid.status_code == 422
         assert client.get("/api/jobs").json()[0]["status"] == "failed"

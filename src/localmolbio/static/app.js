@@ -65,6 +65,7 @@
       const candidates=await request('/api/revisions/'+encodeURIComponent(id)+'/primers');
       if(version!==mapVersion||id!==revision||requestVersion!==primerVersion)return;
       $('#primer-results').innerHTML=candidates.length?candidates.map(q=>`<div class="primer"><span><b>${esc(q.name||'Unnamed')}</b><small>${esc(q.direction)} · ${q.binding_start+1}..${q.binding_end}</small><small>${q.metrics.target?`Target ${q.metrics.target.start+1}–${q.metrics.target.end} bp`:'Unconstrained placement'} · ${q.metrics.product_size} bp product</small></span><code title="${esc(q.sequence_text)}">${esc(q.sequence_text)}</code><span>${Number(q.metrics.tm).toFixed(1)}°<small>${Number(q.metrics.gc_percent).toFixed(1)}% GC</small>${q.selection_state!=='selected'?`<button class="action" data-id="${esc(q.id)}" data-state="selected">Select</button>`:'<small style="color:var(--cyan)">Selected</small>'}${q.selection_state!=='archived'?`<button class="action" data-id="${esc(q.id)}" data-state="archived">Archive</button>`:''}</span></div>`).join(''):'<p class="evidence-note">No candidates saved for this revision.</p>';
+      window.primerReview.render(candidates);
       primerControls();
     } catch(error) {
       if(version===mapVersion&&id===revision&&requestVersion===primerVersion) $('#primer-status').textContent=`Could not load primers: ${error.message}`;
@@ -72,7 +73,7 @@
   }
   function resetConstruct() {
     mapVersion++;primerVersion++;mapController?.abort();revision=null;primerBusy=false;
-    window.sangerView.clear();window.sequenceMap.clear();
+    window.sangerView.clear();window.sequenceMap.clear();window.primerReview.clear();
     $('#primer-results').replaceChildren();$('#primer-status').textContent='';$('#primer-design-summary').textContent='';$('#primer-form [name=target_start]').value='';$('#primer-form [name=target_end]').value='';
     $('#map-title').textContent='Loading construct…';$('#map-summary').textContent='';
     primerControls();
