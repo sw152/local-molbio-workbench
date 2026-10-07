@@ -31,7 +31,7 @@
     el('sanger-upload-button').disabled = busy || !state;
     el('sanger-file').disabled = busy || !state;
     el('sanger-direction').disabled = busy || !state;
-    el('sanger-reads').querySelectorAll('[data-analyze], [data-analysis-direction], [data-analysis-trim], [data-history-page], [data-view-run], [data-latest-run]').forEach(b => b.disabled = busy);
+    el('sanger-reads').querySelectorAll('[data-report-export], [data-analyze], [data-analysis-direction], [data-analysis-trim], [data-history-page], [data-view-run], [data-latest-run]').forEach(b => b.disabled = busy);
   }
   function clear() {
     generation++;
@@ -70,7 +70,7 @@
   }
   function reportView(read, report, latest) {
     const evidence=report.evidence||{},review=evidence.review_flags||[],params=evidence.parameters||{};
-    return `<div class="analysis-version ${latest?'':'historical'}"><b>Run ${report.run_number} · ${latest?'Latest saved analysis':'Historical analysis'}</b><time>${escape(timestamp(report.analyzed_at))}</time><span>${escape(evidence.direction||'Unrecorded')} orientation · requested ${escape(evidence.requested_direction||params.requested_direction||'unrecorded')}</span></div><div class="read-metrics"><div><span>Original mean quality</span><strong>${read.quality_summary?.mean_phred==null?'Unavailable':`Q${Number(read.quality_summary.mean_phred).toFixed(1)}`}</strong></div><div><span>Aligned identity</span><strong>${percent(report.identity_fraction)}</strong></div><div><span>Original read aligned</span><strong>${percent(evidence.read_aligned_fraction)}</strong></div><div><span>Retained read aligned</span><strong>${percent(evidence.retained_read_aligned_fraction)}</strong></div></div>${trimmingView(evidence)}${coverage(evidence,state.length)}${review.length?`<ul class="read-flags">${review.map(flag=>`<li>${escape(flags[flag]||flag)}</li>`).join('')}</ul>`:''}${differences(report.variants||[])}<p class="analysis-method">${escape(params.algorithm||'Method not recorded')} ${escape(params.algorithm_version||'')} · evidence ${escape(params.evidence_version||'unrecorded')} · trimming ${escape(params.trim_quality_threshold?`end calls below Q${params.trim_quality_threshold}`:params.trimming||'not recorded')}<br>Job <code title="${escape(report.job_id)}">${escape(report.job_id)}</code></p>`;
+    return `<div class="analysis-exports"><span>Export this displayed run</span><div><button data-report-export="html" data-analysis-id="${escape(report.alignment_id)}" data-run-number="${report.run_number}">Download HTML</button><button data-report-export="json" data-analysis-id="${escape(report.alignment_id)}" data-run-number="${report.run_number}">Download JSON</button></div></div><div class="analysis-version ${latest?'':'historical'}"><b>Run ${report.run_number} · ${latest?'Latest saved analysis':'Historical analysis'}</b><time>${escape(timestamp(report.analyzed_at))}</time><span>${escape(evidence.direction||'Unrecorded')} orientation · requested ${escape(evidence.requested_direction||params.requested_direction||'unrecorded')}</span></div><div class="read-metrics"><div><span>Original mean quality</span><strong>${read.quality_summary?.mean_phred==null?'Unavailable':`Q${Number(read.quality_summary.mean_phred).toFixed(1)}`}</strong></div><div><span>Aligned identity</span><strong>${percent(report.identity_fraction)}</strong></div><div><span>Original read aligned</span><strong>${percent(evidence.read_aligned_fraction)}</strong></div><div><span>Retained read aligned</span><strong>${percent(evidence.retained_read_aligned_fraction)}</strong></div></div>${trimmingView(evidence)}${coverage(evidence,state.length)}${review.length?`<ul class="read-flags">${review.map(flag=>`<li>${escape(flags[flag]||flag)}</li>`).join('')}</ul>`:''}${differences(report.variants||[])}<p class="analysis-method">${escape(params.algorithm||'Method not recorded')} ${escape(params.algorithm_version||'')} · evidence ${escape(params.evidence_version||'unrecorded')} · trimming ${escape(params.trim_quality_threshold?`end calls below Q${params.trim_quality_threshold}`:params.trimming||'not recorded')}<br>Job <code title="${escape(report.job_id)}">${escape(report.job_id)}</code></p>`;
   }
   function render(reads) {
     state.reads=new Map(reads.map(r=>[r.id,r]));
@@ -80,6 +80,24 @@
     }).join(''):'<div class="read-empty"><span>＋</span><b>No reads attached to this revision</b><p>Add an AB1 chromatogram to review its sequence evidence.</p></div>';
     controls();
   }
+  el('sanger-reads').addEventListener('click',async event=>{
+    const button=event.target.closest('[data-report-export]');
+    if(!button||!state||busy)return;
+    const token=generation,card=button.closest('.read-card'),format=button.dataset.reportExport;
+    const analysisId=button.dataset.analysisId,run=button.dataset.runNumber;
+    busy=true;controls();status(`Preparing run ${run} report…`);
+    try{
+      const response=await fetch(`/api/sanger-reads/${encodeURIComponent(card.dataset.readId)}/analyses/${encodeURIComponent(analysisId)}/export?format=${format}`);
+      if(!response.ok){let detail;try{detail=(await response.json()).detail;}catch{}throw new Error(typeof detail==='string'?detail:`Export failed (${response.status})`);}
+      const blob=await response.blob();
+      if(token!==generation||!card.isConnected)return;
+      const url=URL.createObjectURL(blob),link=document.createElement('a');
+      link.href=url;link.download=`sanger-run-${run}-${analysisId}.${format}`;
+      document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
+      status(`Run ${run} ${format.toUpperCase()} report download started.`);
+    }catch(error){if(token===generation)status(`Could not export report: ${error.message}`,true);}
+    finally{if(token===generation){busy=false;controls();}}
+  });
   el('sanger-reads').addEventListener('click',async event=>{
     const card=event.target.closest('.read-card');
     if(!card||!state||busy)return;

@@ -106,6 +106,30 @@ Its synthetic files, isolated database, logs and screenshots remain under `var/u
 Set `MOLBIO_PUBLIC_AB1` to a separately acquired public fixture path to additionally
 validate its upload and trace display.
 
+## Export one saved Sanger analysis
+
+Each displayed report has **Download HTML** and **Download JSON** controls. Switch
+to a historical run first to export that run; the export always uses its explicit
+analysis ID. HTML is a self-contained, offline-readable report with coverage and
+retained-read diagrams, differences, input provenance, parameters and limitations.
+JSON preserves the complete saved alignment, including its original coordinate
+conventions. Neither format contains raw AB1 signals or full input sequences.
+
+New analysis jobs snapshot input names, lengths and reference topology alongside
+the hashes. For older jobs, linked-record metadata is labeled as such, and missing
+analysis-time hashes remain null/“Not recorded”. Export does not recheck source
+files or rerun the alignment, so an archived report remains exportable if its AB1
+is unavailable. It must not be interpreted as a fresh source-integrity check.
+
+`GET /api/sanger-reads/{read_id}/analyses/{analysis_id}/export?format=json` supports
+`json` (default) or `html`, with attachment headers and no-store caching. The
+analysis must belong to the requested read. User-provided names and all stored
+text are escaped in HTML; filenames use analysis identifiers. Reports contain no
+scripts or external resources. Export schema version 1 is separate from the saved
+alignment evidence version. The optional Sanger browser check validates real
+downloads, historical run binding, error recovery, late-response cancellation and
+offline rendering on desktop and narrow screens.
+
 ## Inspect sequence maps
 
 Select a feature in the diagram or annotation list to inspect its coordinates.

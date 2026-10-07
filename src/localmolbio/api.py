@@ -30,6 +30,7 @@ from .primer_products import review_pair_products
 from .primer_design import PrimerDesignError, PrimerDesignSettings, design_pcr_primers
 import primer3
 from .sanger import SangerReadError, file_sha256, parse_ab1
+from .sanger_report import load_analysis_export, render_analysis_html
 from .sanger_verification import ALIGNMENT_PARAMETERS, SangerVerificationError, align_sanger_read
 
 
@@ -654,7 +655,7 @@ def _check_previous(connection, read_id, expected):
 def create_sanger_verification(request: SangerVerificationInput) -> dict[str, object]:
     with connect() as connection:
         row = connection.execute(
-            """SELECT reads.*, revisions.sequence_text, revisions.sequence_sha256, revisions.topology
+            """SELECT reads.*, revisions.sequence_text, revisions.sequence_sha256, revisions.topology, revisions.label AS reference_label
                FROM sequencing_reads AS reads
                JOIN sequence_revisions AS revisions ON revisions.id = reads.sequence_revision_id
                WHERE reads.id = ?""", (request.sequencing_read_id,),
@@ -703,7 +704,10 @@ def create_sanger_verification(request: SangerVerificationInput) -> dict[str, ob
                 input_manifest_json, result_summary_json, created_at, started_at, completed_at)
                VALUES (?, ?, 'sanger-verification', 'succeeded', ?, ?, ?, ?, ?, ?)""",
             (job_id, row["sequence_revision_id"], json.dumps(parameters),
-             json.dumps({"read_id": row["id"], "read_sha256": row["file_sha256"], "reference_sha256": row["sequence_sha256"], "previous_alignment_id": request.previous_alignment_id}),
+             json.dumps({"read_id": row["id"], "read_sha256": row["file_sha256"], "reference_sha256": row["sequence_sha256"], "previous_alignment_id": request.previous_alignment_id,
+                         "read_filename": row["original_filename"], "read_length_bp": row["length_bp"],
+                         "reference_label": row["reference_label"], "reference_length_bp": len(row["sequence_text"]),
+                         "reference_topology": row["topology"]}),
              json.dumps(summary), started, started, now),
         )
         connection.execute(
@@ -742,6 +746,20 @@ def list_sanger_analyses(read_id: str, limit: int = Query(default=10, ge=1, le=1
         total = connection.execute("SELECT COUNT(*) FROM sanger_analysis_runs WHERE sequencing_read_id = ?", (read_id,)).fetchone()[0]
         rows = connection.execute("SELECT * FROM sanger_analysis_runs WHERE sequencing_read_id = ? ORDER BY run_number DESC LIMIT ? OFFSET ?", (read_id, limit, offset)).fetchall()
     return {"items":[_analysis_report(row) for row in rows],"total":total,"offset":offset,"limit":limit,"has_more":offset+len(rows)<total}
+
+
+@app.get("/api/sanger-reads/{read_id}/analyses/{analysis_id}/export")
+def export_sanger_analysis(read_id: str, analysis_id: str, format: Literal["json", "html"] = "json") -> Response:
+    payload = load_analysis_export(read_id, analysis_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Saved analysis not found for this read")
+    content = json.dumps(payload, indent=2, ensure_ascii=False) if format == "json" else render_analysis_html(payload)
+    # Filenames use identifiers only, never sample names or filesystem paths.
+    safe_id = ''.join(c for c in analysis_id if c.isascii() and (c.isalnum() or c == '-'))[:80]
+    return Response(content=content, media_type="application/json" if format == "json" else "text/html; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="sanger-run-{payload["analysis"]["run_number"]}-{safe_id}.{format}"',
+                             "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store",
+                             "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"})
 
 
 @app.get("/api/sanger-reads/{read_id}/trace")

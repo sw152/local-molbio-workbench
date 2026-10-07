@@ -130,6 +130,12 @@ try:
         page.locator('.history-runs button').filter(has_text='Run 1').click()
         expect(page.locator('.analysis-version')).to_contain_text('Run 1 · Historical')
         expect(page.locator('.analysis-version')).to_contain_text('requested unknown')
+        with page.expect_download() as old_download:
+            page.get_by_role('button',name='Download JSON',exact=True).click()
+        old_download.value.save_as(str(artifacts/'historical-run-1.json'))
+        old_payload=json.loads((artifacts/'historical-run-1.json').read_text())
+        assert old_payload['analysis']['run_number']==1
+        assert old_payload['saved_alignment']['evidence']['requested_direction']=='unknown'
         page.locator('#sanger-panel').screenshot(path=str(artifacts/'history-desktop.png'))
         page.get_by_role('button',name='Show latest report').click()
         expect(page.locator('.analysis-version')).to_contain_text('Run 2 · Latest')
@@ -226,6 +232,59 @@ try:
         page.screenshot(path=str(artifacts/'trim-trace-mobile.png'))
         assert trim_card.locator('.trace-selected').evaluate('(el)=>{const r=el.getBoundingClientRect();const s=el.closest(".trace-scroll").getBoundingClientRect();return r.left>=s.left&&r.right<=s.right;}')
         assert page.locator('#map-panel').evaluate('(el)=>el.scrollWidth<=el.clientWidth+1')
+        # Downloads stay bound to the displayed analysis, with recoverable errors.
+        page.route('**/analyses/*/export?format=html',lambda route:route.fulfill(status=503,content_type='application/json',body=json.dumps({'detail':'Simulated report export outage'})),times=1)
+        trim_card.get_by_role('button',name='Download HTML',exact=True).click()
+        expect(page.locator('#sanger-status')).to_contain_text('Could not export report')
+        expect(trim_card.get_by_role('button',name='Download HTML',exact=True)).to_be_enabled()
+        with page.expect_download() as html_download:
+            trim_card.get_by_role('button',name='Download HTML',exact=True).click()
+        html_path=artifacts/'trimmed-run-2.html';html_download.value.save_as(str(html_path))
+        with page.expect_download() as json_download:
+            trim_card.get_by_role('button',name='Download JSON',exact=True).click()
+        json_download.value.save_as(str(artifacts/'trimmed-run-2.json'))
+        payload=json.loads((artifacts/'trimmed-run-2.json').read_text())
+        assert payload['analysis']['run_number']==2
+        assert payload['parameters']['trim_quality_threshold']==20
+        assert payload['saved_alignment']['variants'][0]['original_read_position']==419
+        assert payload['inputs']['read']['filename']['value']==trim_path.name
+        # Open the downloaded HTML offline: no dependency on a running app or network.
+        offline=browser.new_context(offline=True,viewport={'width':1100,'height':1000})
+        report_page=offline.new_page();report_errors=[];report_requests=[]
+        report_page.on('pageerror',lambda error:report_errors.append(str(error)))
+        report_page.on('request',lambda request:report_requests.append(request.url))
+        report_page.goto(html_path.as_uri())
+        expect(report_page.locator('h1')).to_have_text('Sanger analysis report')
+        expect(report_page.locator('header')).to_contain_text('Run 2')
+        expect(report_page.locator('.metrics')).to_contain_text('91.7%')
+        expect(report_page.locator('.variants tbody')).to_contain_text('420')
+        report_page.screenshot(path=str(artifacts/'export-report-desktop.png'),full_page=True)
+        report_page.get_by_role('heading',name='Differences',exact=False).scroll_into_view_if_needed()
+        report_page.screenshot(path=str(artifacts/'export-report-differences.png'))
+        report_page.set_viewport_size({'width':390,'height':844})
+        report_page.evaluate('window.scrollTo(0,0)')
+        report_page.evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
+        report_page.screenshot(path=str(artifacts/'export-report-mobile.png'))
+        assert report_page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+        assert not report_errors,report_errors
+        assert not any(url.startswith(('http:','https:')) for url in report_requests),report_requests
+        offline.close()
+        # Closing the construct cancels delivery of a late export response.
+        pending=[];late_downloads=[]
+        page.route('**/analyses/*/export?format=json',lambda route:pending.append(route),times=1)
+        page.on('download',lambda download:late_downloads.append(download))
+        trim_card.get_by_role('button',name='Download JSON',exact=True).click()
+        for _ in range(30):
+            if pending:break
+            page.wait_for_timeout(20)
+        assert pending
+        page.locator('#close-map').click()
+        with page.expect_response('**/analyses/*/export?format=json'):
+            pending[0].fulfill(status=200,content_type='application/json',body=json.dumps(payload))
+        page.evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
+        assert not late_downloads
+        page.get_by_role('button',name='Open map').click()
+        expect(trim_card.locator('.analysis-version')).to_contain_text('Run 2 · Latest')
         # Optional externally supplied public ABI fixture; never bundled or committed.
         public_fixture = os.environ.get('MOLBIO_PUBLIC_AB1')
         if public_fixture:
@@ -248,7 +307,7 @@ try:
         expect(page.locator('#sanger-status')).to_contain_text('Could not load reads')
         assert not errors, errors
         browser.close()
-    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['binary ABIF upload','invalid and duplicate upload','analysis and persisted evidence','append-only rerun and historical report switching','six-run history pagination','optional end trimming with original and retained coverage','reverse trimmed variant and boundary jump to original peaks','history network failure and stale rerun recovery','Q12 variant and focused chromatogram','desktop and mobile layouts','network failure','no JS exceptions']},indent=2))
+    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['binary ABIF upload','invalid and duplicate upload','analysis and persisted evidence','append-only rerun and historical report switching','six-run history pagination','optional end trimming with original and retained coverage','historical and current JSON/HTML downloads','offline HTML rendering without external requests','export failure recovery and late-response cancellation','reverse trimmed variant and boundary jump to original peaks','history network failure and stale rerun recovery','Q12 variant and focused chromatogram','desktop and mobile layouts','network failure','no JS exceptions']},indent=2))
 finally:
     server.terminate()
     server.wait(timeout=10)
