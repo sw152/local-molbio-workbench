@@ -15,7 +15,7 @@ with zipfile.ZipFile(archive,'w') as z:
     for name in ['Alignment demo A','Alignment demo B']:
         rec=SeqRecord(Seq(ref),id=name.replace(' ','_'),name=name.replace(' ','_'),annotations={'molecule_type':'DNA','topology':'circular'})
         stream=io.StringIO();SeqIO.write(rec,stream,'genbank');z.writestr(name+'.gb',stream.getvalue())
-reads=[ref[100:500],str(Seq(ref[350:800]).reverse_complement()),ref[-200:]+ref[:200],'A'*350,ref[80:240]+ref[246:520],ref+ref]
+reads=[ref[100:500],str(Seq(ref[350:800]).reverse_complement()),ref[-200:]+ref[:200],'A'*350,ref[80:240]+ref[246:520],ref+ref,ref[50:600],ref[70:570]]
 # This repeat permits a one-base left-shift of the same 6-base deletion.
 assert ref[80:239]+ref[245:520] == ref[80:240]+ref[246:520]
 data=''.join(f'@duplicate\n{r}\n+\n'+('I'*len(r))+'\n' for r in reads).encode()
@@ -73,6 +73,41 @@ try:
         coverage.locator('#aj-region-kind').select_option('deletion')
         expect(coverage.locator('.aj-regions')).to_contain_text('[239, 245)')
         coverage.scroll_into_view_if_needed();page.screenshot(path=str(artifacts/'alignment-coverage-desktop.png'))
+        coverage.locator('[data-aj-inspect]').click()
+        focused=panel.locator('.aj-region-filter')
+        expect(focused).to_contain_text('4 matching records / 8 total')
+        expect(panel.locator('.aj-read')).to_have_count(3)
+        expect(panel.locator('.aj-read').nth(0)).to_contain_text('Record 1')
+        expect(panel.locator('.aj-read').nth(1)).to_contain_text('Record 5')
+        expect(panel.locator('.aj-read').nth(1).locator('.aj-region-evidence')).to_contain_text('Deletion positions: [239, 245)')
+        panel.locator('[data-aj-reads]').last.click();expect(panel.locator('.aj-read')).to_have_count(1)
+        expect(panel.locator('.aj-read')).to_contain_text('Record 8')
+        expect(focused).to_contain_text('Reference [239, 245)')
+        expect(panel.locator('#aj-relation')).to_have_value('either')
+        panel.locator('[data-aj-reads]').first.click();expect(panel.locator('.aj-read')).to_have_count(3)
+        focused.scroll_into_view_if_needed();page.screenshot(path=str(artifacts/'alignment-region-desktop.png'))
+        panel.locator('#aj-relation').select_option('deletion')
+        expect(focused).to_contain_text('1 matching record / 8 total')
+        expect(panel.locator('.aj-read')).to_have_count(1)
+        expect(panel.locator('.aj-read')).to_contain_text('Record 5')
+        panel.locator('[data-aj-refresh]').click();expect(status).to_contain_text('refreshed')
+        expect(panel.locator('#aj-relation')).to_have_value('deletion')
+        expect(panel.locator('.aj-read')).to_contain_text('Record 5')
+        # A failed relation change retains the previously committed filter and evidence.
+        page.route('**/reads?*',lambda route:route.fulfill(status=503,json={'detail':'reads temporarily unavailable'}))
+        panel.locator('#aj-relation').select_option('paired');expect(status).to_contain_text('reads temporarily unavailable')
+        expect(panel.locator('#aj-relation')).to_have_value('deletion')
+        expect(panel.locator('.aj-read')).to_contain_text('Record 5')
+        page.unroute('**/reads?*')
+        panel.locator('#aj-relation').select_option('paired')
+        expect(panel.locator('.aj-read')).to_have_count(3);expect(panel.locator('.aj-read').first).to_contain_text('Record 1')
+        page.set_viewport_size({'width':390,'height':844});focused.scroll_into_view_if_needed()
+        page.screenshot(path=str(artifacts/'alignment-region-mobile.png'))
+        assert page.locator('#map-panel').evaluate('(e)=>e.scrollWidth<=e.clientWidth')
+        panel.locator('[data-aj-overview]').click();expect(coverage).to_be_in_viewport(ratio=.1)
+        panel.locator('[data-aj-all-reads]').click();expect(focused).to_have_count(0)
+        expect(panel.locator('.aj-read')).to_have_count(3)
+        page.set_viewport_size({'width':1440,'height':1080})
         coverage.locator('#aj-region-kind').select_option('ambiguous_only')
         expect(coverage.locator('.aj-regions')).to_contain_text('No regions in this category')
         coverage.locator('#aj-region-kind').select_option('unpaired')
@@ -115,6 +150,17 @@ try:
         assert page.locator('#map-panel').evaluate('(e)=>e.scrollWidth<=e.clientWidth')
         assert reverse.locator('.aj-diagram').first.evaluate('(e)=>e.scrollWidth>e.clientWidth')
         panel.locator('.aj-read').nth(2).scroll_into_view_if_needed();page.screenshot(path=str(artifacts/'alignment-wrap-mobile.png'))
+        # A filtered response that arrives after switching revisions cannot restore old reads.
+        page.evaluate('''() => {const real=window.fetch.bind(window);window.delayRegion=true;window.fetch=async (url,opts)=>{
+          const r=await real(url,opts);if(window.delayRegion && String(url).includes('/reads?') && String(url).includes('&start=')){
+            window.delayRegion=false;window.regionWaiting=true;
+            return new Promise(resolve=>setTimeout(()=>{window.oldRegionDone=true;resolve(r)},1200));}return r;};}''')
+        coverage.locator('[data-aj-inspect]').click();page.wait_for_function('window.regionWaiting')
+        page.locator('#close-map').click();page.locator('.open').nth(1).click();expect(status).to_contain_text('Choose files')
+        page.wait_for_function('window.oldRegionDone');expect(panel.locator('.aj-read')).to_have_count(0)
+        expect(panel.locator('.aj-region-filter')).to_have_count(0)
+        page.locator('#close-map').click();page.locator('.open').first.click();expect(status).to_contain_text('Choose files')
+        panel.locator('#aj-type').select_option('ont-high-accuracy')
         # Input pages retain explicit selection; new tasks can be cancelled and paginated.
         for i in range(5):
             r=page.request.post(base+f'/api/revisions/{revision}/fastq-inputs',multipart={'quality_encoding':'phred33','file':{'name':f'extra-{i}.fq','mimeType':'application/octet-stream','buffer':(f'@extra{i}\n{ref[20:420]}\n+\n'+('I'*400)+'\n').encode()}})
@@ -164,7 +210,7 @@ try:
         panel.scroll_into_view_if_needed();page.screenshot(path=str(artifacts/'alignment-empty-mobile.png'))
         assert not errors,errors
         browser.close()
-    (artifacts/'result.json').write_text(json.dumps({'passed':True,'real_minimap2':True,'synthetic_only':True,'checks':['explicit type','lost response idempotency','real worker','forward/reverse/circular origin evidence','real deletion remains a diagram gap','multi-traversal withheld is distinct from no hit','read/job/input/attempt pagination','cross-page selection','cancel','refresh failure recovery','late detail and submission revision isolation','mobile overflow','coverage composition and overlapping deletion evidence','coverage filter and failure recovery'],'screenshots':[p.name for p in artifacts.glob('*.png')]},indent=2))
+    (artifacts/'result.json').write_text(json.dumps({'passed':True,'real_minimap2':True,'synthetic_only':True,'checks':['explicit type','lost response idempotency','real worker','forward/reverse/circular origin evidence','real deletion remains a diagram gap','multi-traversal withheld is distinct from no hit','read/job/input/attempt pagination','cross-page selection','cancel','refresh failure recovery','late detail and submission revision isolation','mobile overflow','coverage composition and overlapping deletion evidence','coverage filter and failure recovery','region read navigation, pagination and original provenance','paired versus deletion filters and refresh persistence','failed filter preserves committed evidence','mobile focused review and return to overview','late filtered response revision isolation'],'screenshots':[p.name for p in artifacts.glob('*.png')]},indent=2))
     print(json.dumps({'artifacts':str(artifacts),'passed':True}))
 finally:
     server.terminate();server.wait(timeout=10);log.close()

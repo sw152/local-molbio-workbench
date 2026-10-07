@@ -135,3 +135,37 @@ def regions(summary, kind):
     if kind not in predicates:
         raise CoverageError('invalid_coverage_region_kind')
     return _union([(s['start'],s['end']) for s in summary['segments'] if predicates[kind](s['depths'])])
+
+
+def select_region(evidence, start, end, relation='either'):
+    """Match half-open reference overlap, with every candidate validated before selection."""
+    try:
+        length = evidence['reference_length_bp']
+        _integer(length,1,MAX_REFERENCE)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CoverageError('invalid_coverage_geometry') from exc
+    if (type(start) is not int or type(end) is not int or not 0 <= start < end <= length
+            or relation not in ('paired','deletion','either')):
+        raise CoverageError('invalid_reference_region')
+    selected = {}
+    try:
+        _integer(length,1,MAX_REFERENCE)
+        if evidence['topology'] not in ('linear','circular'):
+            raise CoverageError('invalid_coverage_geometry')
+        for index,read in enumerate(evidence['reads']):
+            paired,deleted,hit_indices = [],[],[]
+            for hit_index,hit in enumerate(read['alignments']):
+                p,d = _geometry(hit,read['length_bp'],length,evidence['topology'])
+                p = [[max(a,start),min(b,end)] for a,b in p if a < end and b > start]
+                d = [[max(a,start),min(b,end)] for a,b in d if a < end and b > start]
+                paired.extend(p);deleted.extend(d)
+                if (p and relation in ('paired','either')) or (d and relation in ('deletion','either')):
+                    hit_indices.append(hit_index)
+            if hit_indices:
+                selected[index] = dict(paired_intervals=_union(paired),deletion_intervals=_union(deleted),
+                                       matching_hit_indices=hit_indices,
+                                       placement_category='single_reported_alignment' if len(read['alignments'])==1 and not read['withheld'] else 'ambiguous_or_withheld')
+        return selected
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        if isinstance(exc,CoverageError):raise
+        raise CoverageError('invalid_coverage_geometry') from exc

@@ -1,7 +1,7 @@
 """Revision-scoped alignment jobs; publish only queue-committed evidence."""
 from contextlib import closing
 import json
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -144,15 +144,30 @@ def detail(revision_id: str, job_id: str, limit: int=Query(5,ge=1,le=100), offse
 
 
 @router.get('/{job_id}/reads')
-def reads(revision_id: str, job_id: str, limit: int=Query(20,ge=1,le=100), offset: int=Query(0,ge=0)):
+def reads(revision_id: str, job_id: str, limit: int=Query(20,ge=1,le=100), offset: int=Query(0,ge=0),
+          start: Optional[int]=Query(None,ge=0), end: Optional[int]=Query(None,ge=0),
+          relation: Literal['paired','deletion','either']='either'):
     with closing(connect()) as db:
         db.execute('BEGIN');evidence = _published(_job(db,revision_id,job_id))
     _validate_sources(evidence)
     all_reads, sources = evidence['reads'], evidence['sources']
-    items = [{**{k:r[k] for k in READ_FIELDS},
-              'source':{k:sources[i][k] for k in ('query_name','input_id','record_ordinal','sequence_sha256')}}
-             for i,r in enumerate(all_reads[offset:offset+limit],offset)]
-    return {**_page(items,len(all_reads),limit,offset), 'scope':SCOPE,
+    selected = None
+    if (start is None) != (end is None) or (start is None and relation != 'either'):
+        raise HTTPException(422,'both_reference_boundaries_required')
+    if start is not None:
+        from .alignment_coverage import select_region, CoverageError
+        try:
+            selected = select_region(evidence,start,end,relation)
+        except CoverageError as exc:
+            raise HTTPException(422 if str(exc)=='invalid_reference_region' else 409,str(exc)) from exc
+    indices = list(range(len(all_reads))) if selected is None else list(selected)
+    items = [{**{k:all_reads[i][k] for k in READ_FIELDS},
+              'source':{k:sources[i][k] for k in ('query_name','input_id','record_ordinal','sequence_sha256')},
+              **({'region_evidence':selected[i]} if selected is not None else {})}
+             for i in indices[offset:offset+limit]]
+    return {**_page(items,len(indices),limit,offset), 'scope':SCOPE,
+            'unfiltered_total':len(all_reads),
+            'region':None if selected is None else {'start':start,'end':end,'relation':relation},
             'coordinate_convention':evidence['coordinate_convention'],
             'base_quality_used':evidence['base_quality_used'],
             'whole_reference_verified':evidence['whole_reference_verified']}

@@ -137,3 +137,72 @@ def test_another_record_pairs_across_reported_deletion_without_consensus_claim()
     assert s['paired_bases']==8 and s['unpaired_bases']==0 and s['deletion_evidence_bases']==2
     assert depths(s)[3]==[1,0,1,0] and regions(s,'deletion')==[[3,5]]
     assert not s['whole_reference_verified'] and not s['independent_molecules_assessed']
+
+
+def test_region_half_open_reverse_and_circular_boundaries():
+    from localmolbio.alignment_coverage import select_region
+    e=evidence('A'*8,['T'*4],[line(4,0,4,'-',8,4,8,4,4,'4=')])
+    assert select_region(e,0,4)=={}
+    assert select_region(e,7,8,'paired')[0]['paired_intervals']==[[7,8]]
+    e=evidence('A'*8,['AAAA'],[line(4,0,4,'+',16,5,12,4,7,'2=3D2=')],'circular')
+    assert select_region(e,0,2,'paired')=={}
+    assert select_region(e,0,2,'deletion')[0]['deletion_intervals']==[[0,2]]
+    assert select_region(e,7,8,'deletion')[0]['deletion_intervals']==[[7,8]]
+    assert select_region(e,2,4)[0]['paired_intervals']==[[2,4]]
+    assert select_region(e,4,5)=={}
+
+
+def test_region_candidates_deduplicate_records_but_preserve_contrasting_evidence():
+    from localmolbio.alignment_coverage import select_region
+    e=evidence('A'*10,['A'*6],[line(6,0,6,'+',10,0,8,6,8,'3=2D3='),line(6,0,6,'+',10,3,9,6,6,'6=',tp='S')])
+    paired=select_region(e,3,5,'paired');deleted=select_region(e,3,5,'deletion')
+    assert list(paired)==list(deleted)==[0]
+    assert paired[0]['matching_hit_indices']==[1] and deleted[0]['matching_hit_indices']==[0]
+    assert paired[0]['paired_intervals']==paired[0]['deletion_intervals']==[[3,5]]
+    assert paired[0]['placement_category']=='ambiguous_or_withheld'
+    assert select_region(e,3,5)[0]['matching_hit_indices']==[0,1]
+    e['reads'][0]['alignments'][0]['cigar']='bad'
+    with pytest.raises(CoverageError):select_region(e,8,9,'paired')
+
+
+@pytest.mark.parametrize('start,end,relation',[(0,0,'either'),(5,3,'either'),(-1,2,'either'),(0,11,'either'),(True,3,'either'),(0,3,'unknown')])
+def test_region_invalid_queries(start,end,relation):
+    from localmolbio.alignment_coverage import select_region
+    with pytest.raises(CoverageError,match='invalid_reference_region'):
+        select_region(evidence('A'*10,['A'],[]),start,end,relation)
+
+
+def test_region_withheld_only_has_no_inferred_positions():
+    from localmolbio.alignment_coverage import select_region
+    e=evidence('A'*10,['A'*15],[line(15,0,15,'+',20,0,15,15,15,'15=')],'circular')
+    assert select_region(e,0,10)=={}
+
+
+def test_region_api_filters_before_paging_preserves_original_sources_and_scope(setup):
+    client,revision,ref=setup
+    item=register(revision,[ref[300:550],ref[50:200]+ref[207:500],ref[50:500],ref[30:480]])
+    root=f'/api/revisions/{revision}/alignments'
+    job=client.post(root,json={'input_ids':[item['id']],'data_type':'ont-high-accuracy','idempotency_key':'region'}).json()['id']
+    url=root+'/'+job+'/reads';query='?start=200&end=207&limit=1'
+    assert client.get(url+query).status_code==409
+    assert run()['status']=='succeeded'
+    pages=[client.get(url+query+f'&offset={i}').json() for i in range(3)]
+    assert all(p['total']==3 and p['unfiltered_total']==4 for p in pages)
+    assert [p['items'][0]['source']['record_ordinal'] for p in pages]==[2,3,4]
+    assert [p['items'][0]['source']['query_name'] for p in pages]==['q1','q2','q3']
+    assert pages[0]['items'][0]['region_evidence']['deletion_intervals']==[[200,207]]
+    assert pages[1]['items'][0]['region_evidence']['paired_intervals']==[[200,207]]
+    assert [p['has_more'] for p in pages]==[True,True,False]
+    assert client.get(url+query+'&relation=paired').json()['total']==2
+    assert client.get(url+query+'&relation=deletion').json()['total']==1
+    assert client.get(url+'?start=550&end=600').json()['total']==0
+    full=client.get(url).json();assert full['total']==4 and full['region'] is None
+    assert 'region_evidence' not in full['items'][0] and not full['whole_reference_verified']
+    other=sibling_revision(revision);assert client.get(url.replace(revision,other)+query).status_code==404
+    for invalid in ['start=1','end=5','relation=paired','start=0&end=0','start=5&end=3','start=0&end=601','start=-1&end=5','start=0&end=5&relation=invalid']:
+        assert client.get(url+'?'+invalid).status_code==422,invalid
+    with connect() as db:
+        result=json.loads(db.execute('SELECT result_summary_json FROM analysis_jobs WHERE id=?',(job,)).fetchone()[0])
+        result['reads'][0]['alignments'][0]['cigar']='bad'
+        db.execute('UPDATE analysis_jobs SET result_summary_json=? WHERE id=?',(json.dumps(result),job))
+    assert client.get(url+query).status_code==409
