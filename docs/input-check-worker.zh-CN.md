@@ -13,9 +13,9 @@ python -m localmolbio.worker once --worker-id m2-input-check --lease-seconds 60
 
 多个输入可以重复提供 `--read-id`，一项任务最多 100 个不同读段，全部必须属于指定修订。提交排序后的输入清单，使同一集合不同排列不会制造不同请求；每项保存读段 ID 和登记的 SHA-256，以及参考修订 ID、SHA-256、拓扑。请求键遵循队列幂等规则，返回原任务并不代表重新排队；有意重跑使用新键。`--max-attempts` 范围为 1–10，默认 3。
 
-`once` 最多领取一项 `registered-ab1-input-check-v1` 任务，结束后退出。没有兼容任务输出 `idle`，不启动常驻服务。未知 adapter 不执行，也不会将请求中的字符串视为命令。当前只有内部 Python 入队接口和以上 CLI；批量上传/API/UI 仍待接入。
+`once` 最多领取一项 `registered-ab1-input-check-v1` 任务，结束后退出。没有兼容任务输出 `idle`，不启动常驻服务。未知 adapter 不执行，也不会将请求中的字符串视为命令。除内部 Python 接口和 CLI 外，已提供 [修订范围内的提交 API 与任务界面](input-check-ui.zh-CN.md)；批量上传仍未实现。
 
-退出码：提交被接受（包括已有请求）、idle 或输入检查成功为 0；本次尝试失败或丢失租约为 1；无效提交/参数为 2。`attempt_failed` 是本次尝试失败，任务可能因可重试 I/O 问题重新进入 queued，并不必然表示预算已耗尽。现有 `/api/jobs` 可查看顶层任务状态；逐次尝试的专用 API 尚未实现。
+退出码：提交被接受（包括已有请求）、idle 或输入检查成功为 0；本次尝试失败或丢失租约为 1；无效提交/参数为 2。`attempt_failed` 是本次尝试失败，任务可能因可重试 I/O 问题重新进入 queued，并不必然表示预算已耗尽。现有 `/api/jobs` 可查看顶层任务状态；专用输入检查详情 API 现已提供分页尝试历史。
 
 ## 检查内容与边界
 

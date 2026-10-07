@@ -151,7 +151,7 @@
     window.sangerSummary.clear();
     state.groupHash=null;
     const result = await request(`/api/sequence-revisions/${encodeURIComponent(state.id)}/sanger-reads?include_summary=true`);
-    if (token === generation) { state.groupHash=result.snapshot_sha256; render(result.reads); window.sangerSummary.render(result.summary); controls(); }
+    if (token === generation) { state.groupHash=result.snapshot_sha256; render(result.reads); window.inputJobs?.updateReads(state.id,result.reads); window.sangerSummary.render(result.summary); controls(); }
   }
   async function open(id, length) {
     clear();
