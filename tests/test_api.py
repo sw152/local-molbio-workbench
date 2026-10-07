@@ -105,6 +105,7 @@ def test_sanger_evidence_survives_reload_and_records_inputs(tmp_path, monkeypatc
     from io import StringIO
     import json
 
+    from abif_fixture import synthetic_ab1
     reference = "ATCGGATCAGGTACGTTAGCTACGTGGTACCACTGATCCGAGTACGTAGCTACGACATCG"
     monkeypatch.setenv("MOLBIO_DATA_DIR", str(tmp_path / "runtime"))
     monkeypatch.setattr("localmolbio.api.parse_ab1", lambda _: SangerRead(
@@ -120,7 +121,7 @@ def test_sanger_evidence_survives_reload_and_records_inputs(tmp_path, monkeypatc
         assert client.post("/api/imports/benchling", files={"file": ("synthetic.zip", archive.getvalue())}).status_code == 201
         sequence_id = client.get("/api/sequences").json()[0]["id"]
         revision = client.get(f"/api/sequences/{sequence_id}/revisions").json()[0]["id"]
-        uploaded = client.post("/api/sanger-reads", data={"sequence_revision_id": revision}, files={"file": ("synthetic.ab1", b"fixture")})
+        uploaded = client.post("/api/sanger-reads", data={"sequence_revision_id": revision}, files={"file": ("synthetic.ab1", synthetic_ab1(reference[-30:], [40] * 30, trace=True))})
         assert uploaded.status_code == 201
         result = client.post("/api/sanger-verifications", json={"sequencing_read_id": uploaded.json()["id"]})
         assert result.status_code == 201, result.text
@@ -135,11 +136,25 @@ def test_sanger_evidence_survives_reload_and_records_inputs(tmp_path, monkeypatc
         assert saved["evidence"] == evidence
         assert "storage_path" not in saved
         assert client.get("/api/sequence-revisions/missing/sanger-reads").status_code == 404
+        read_id = uploaded.json()["id"]
+        trace = client.get(f"/api/sanger-reads/{read_id}/trace?start=2&count=8")
+        assert trace.status_code == 200
+        assert trace.json()["available"] is True
+        assert len(trace.json()["bases"]) == 8
+        assert trace.json()["bases"][0]["base"] == reference[-28]
+        assert client.get(f"/api/sanger-reads/{read_id}/trace?start=-1").status_code == 422
+        assert client.get("/api/sanger-reads/missing/trace").status_code == 404
         with connect() as db:
             job = db.execute("SELECT * FROM analysis_jobs WHERE job_kind = 'sanger-verification'").fetchone()
             assert json.loads(job["parameters_json"])["evidence_version"] == 2
             assert json.loads(job["input_manifest_json"])["read_sha256"] == uploaded.json()["file_sha256"]
             assert len(json.loads(db.execute("SELECT qualities_json FROM sequencing_reads").fetchone()[0])) == 30
+            stored = db.execute("SELECT storage_path FROM sequencing_reads").fetchone()[0]
+        from pathlib import Path
+        Path(stored).write_bytes(b"changed fixture")
+        assert client.get(f"/api/sanger-reads/{read_id}/trace").status_code == 409
+        Path(stored).unlink()
+        assert client.get(f"/api/sanger-reads/{read_id}/trace").status_code == 409
 
 
 def test_missing_revision_rejected_before_ab1_parse(tmp_path, monkeypatch):

@@ -39,9 +39,28 @@ For the complete Tailscale SSH, Serve, and future remote-worker setup, read [the
 - Searchable local sequence inventory
 - Circular plasmid-map preview with feature tracks and source-coordinate review status
 - Primer3-backed PCR candidate generation with persisted design parameters and evidence
+- Revision-scoped AB1 upload, local Sanger alignment, coverage and quality-aware difference review
+- Windowed four-channel chromatograms, original-read navigation, and jumps from differences to their peak evidence
 
-Real Benchling exports are private research data. Keep them outside the repository. The test suite uses synthetic records only.
+Real Benchling exports are private research data. Keep them outside the repository. The core test suite uses synthetic records. An optional browser check can also inspect a separately supplied public AB1 fixture; it is not bundled.
 
 The product boundary, workstation deployment model, data model, and staged acceptance criteria are documented in [the Chinese architecture and roadmap](docs/architecture-and-roadmap.zh-CN.md).
 
 The continuously executed delivery plan is in [the Chinese execution plan](docs/execution-plan.zh-CN.md).
+
+## Review Sanger evidence
+
+Open a sequence, attach an AB1 file, then analyze it against the current revision.
+The read card shows local alignment identity, reference coverage and review flags.
+“View chromatogram” displays the stored analyzed signal and Phred calls. Selecting
+an original-read position in the difference table centers that base in the trace.
+The trace always uses the uploaded read orientation, including for reverse alignments.
+Missing or inconsistent trace metadata is reported; no replacement signal is generated.
+High identity alone does not verify the whole plasmid.
+
+For reproducible browser checks, install `.[dev,ui]` and run
+`python scripts/verify_sanger_ui.py`. It uses an installed macOS Chrome or Playwright
+Chromium (install the latter with `python -m playwright install chromium` if needed).
+Its synthetic files, isolated database, logs and screenshots remain under `var/ui-check/`.
+Set `MOLBIO_PUBLIC_AB1` to a separately acquired public fixture path to additionally
+validate its upload and trace display.

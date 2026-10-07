@@ -11,12 +11,13 @@ from tempfile import NamedTemporaryFile
 from typing import Literal, Optional
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Query
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .config import database_path, read_dir
+from .chromatogram import trace_window
 from .database import connect, initialise
 from .importer import (
     ImportErrorDetail,
@@ -631,3 +632,25 @@ def list_sanger_reads(revision_id: str) -> list[dict[str, object]]:
             item["evidence"] = {"scope": "legacy_local_alignment", "review_flags": ["legacy_evidence_unavailable"], "whole_reference_verified": False}
         output.append(item)
     return output
+
+
+@app.get("/api/sanger-reads/{read_id}/trace")
+def get_sanger_trace(
+    read_id: str, start: int = Query(default=0, ge=0), count: int = Query(default=24, ge=1, le=80),
+) -> dict[str, object]:
+    with connect() as connection:
+        row = connection.execute(
+            "SELECT storage_path, file_sha256 FROM sequencing_reads WHERE id = ?", (read_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Sanger read not found")
+    path = Path(row["storage_path"])
+    try:
+        if file_sha256(path) != row["file_sha256"]:
+            raise HTTPException(status_code=409, detail="Original AB1 hash changed; trace evidence cannot be trusted")
+        result = trace_window(path, start, count)
+    except OSError as exc:
+        raise HTTPException(status_code=409, detail="Original AB1 file is unavailable") from exc
+    except SangerReadError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"read_id": read_id, "file_sha256": row["file_sha256"], **result}
