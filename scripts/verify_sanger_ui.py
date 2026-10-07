@@ -51,6 +51,10 @@ trim_path.write_bytes(synthetic_ab1(str(Seq(''.join(trim_calls)).reverse_complem
 high_calls=list(reference[100:500]);high_calls[90]=next(b for b in 'ACGT' if b!=high_calls[90])
 high_path=artifacts/'synthetic-Q40-difference.ab1'
 high_path.write_bytes(synthetic_ab1(''.join(high_calls),[40]*400,trace=True))
+inserted=next(b for b in 'ACGT' if b!=reference[650])+'G'+next(b for b in 'ACGT' if b!=reference[649])
+indel_calls=reference[500:650]+inserted+reference[650:800]
+indel_path=artifacts/'synthetic-reverse-insertion.ab1'
+indel_path.write_bytes(synthetic_ab1(str(Seq(indel_calls).reverse_complement()),[35]*len(indel_calls),trace=True))
 invalid = artifacts / "invalid.ab1"
 invalid.write_bytes(b"invalid data")
 with socket.socket() as s:
@@ -465,6 +469,32 @@ try:
         assert not group_late
         page.get_by_role('button',name='Open map').click()
         expect(high_card.locator('.analysis-version')).to_contain_text('Run 2 · Latest')
+        # Grouped indel anchors retain reverse-read coordinates without an indel verdict.
+        page.locator('#sanger-file').set_input_files(str(indel_path))
+        page.get_by_role('button',name='Attach AB1',exact=True).click()
+        indel_card=page.locator('.read-card').filter(has_text=indel_path.name)
+        indel_card.get_by_role('button',name='Analyze against this revision').click()
+        expect(indel_card.locator('.analysis-version')).to_contain_text('Run 1')
+        page.locator('.indel-review summary').click()
+        expect(page.locator('.indel-event')).to_have_count(1)
+        expect(page.locator('.indel-event')).to_contain_text('insertion · 3 bp')
+        expect(page.locator('.indel-event')).to_contain_text('Flanks meet checks')
+        expect(page.locator('.indel-event')).to_contain_text('Reference boundary after 650')
+        expect(page.locator('.indel-review')).to_contain_text('not normalized or compared across reads')
+        page.locator('.indel-event').screenshot(path=str(artifacts/'indel-anchors-desktop.png'))
+        page.locator('.indel-flanks button').first.click()
+        expect(indel_card.locator('.trace-selected')).to_have_attribute('data-peak-position','153')
+        page.set_viewport_size({'width':390,'height':844})
+        page.locator('.indel-event').evaluate('(el)=>el.scrollIntoView({block:"start"})')
+        page.evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
+        page.screenshot(path=str(artifacts/'indel-anchors-mobile.png'))
+        assert page.locator('.indel-event').evaluate('(el)=>el.scrollWidth<=el.clientWidth+1')
+        with page.expect_download() as indel_export:
+            page.get_by_role('button',name='Group JSON',exact=True).click()
+        indel_export_path=artifacts/'indel-group.json';indel_export.value.save_as(str(indel_export_path))
+        exported_events=json.loads(indel_export_path.read_text())['snapshot']['summary']['quality_review']['indel_review']['events']
+        assert len(exported_events)==1 and exported_events[0]['eligible_for_exact_anchor_review']
+        assert exported_events[0]['original_read_positions']==[152,151,150]
         # A failed list request must be shown, not reported as an empty library.
         page.locator('#close-map').click()
         page.route('**/api/sequence-revisions/*/sanger-reads*', lambda route: route.abort())
@@ -473,7 +503,7 @@ try:
         expect(page.locator('#sanger-summary')).to_be_empty()
         assert not errors, errors
         browser.close()
-    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['group JSON/HTML downloads, offline rendering, stale snapshot rejection and late-response cancellation','quality-filtered multi-read overlap, conflict and original peak navigation','base-level Q20 mapping, reverse original coordinates and historical absence','high-quality difference shown separately from matching evidence','latest-only multi-read coverage, overlap and circular gap review','binary ABIF upload','invalid and duplicate upload','analysis and persisted evidence','append-only rerun and historical report switching','six-run history pagination','optional end trimming with original and retained coverage','historical and current JSON/HTML downloads','offline HTML rendering without external requests','export failure recovery and late-response cancellation','reverse trimmed variant and boundary jump to original peaks','history network failure and stale rerun recovery','Q12 variant and focused chromatogram','desktop and mobile layouts','network failure','no JS exceptions']},indent=2))
+    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['grouped reverse insertion, Q20 flank audit, original peak jump and snapshot export','group JSON/HTML downloads, offline rendering, stale snapshot rejection and late-response cancellation','quality-filtered multi-read overlap, conflict and original peak navigation','base-level Q20 mapping, reverse original coordinates and historical absence','high-quality difference shown separately from matching evidence','latest-only multi-read coverage, overlap and circular gap review','binary ABIF upload','invalid and duplicate upload','analysis and persisted evidence','append-only rerun and historical report switching','six-run history pagination','optional end trimming with original and retained coverage','historical and current JSON/HTML downloads','offline HTML rendering without external requests','export failure recovery and late-response cancellation','reverse trimmed variant and boundary jump to original peaks','history network failure and stale rerun recovery','Q12 variant and focused chromatogram','desktop and mobile layouts','network failure','no JS exceptions']},indent=2))
 finally:
     server.terminate()
     server.wait(timeout=10)

@@ -2,6 +2,7 @@
 from collections import defaultdict
 from hashlib import sha256
 from .sanger_mapping import build_base_mapping, intervals
+from .sanger_indel_review import review_indels
 
 COMPLEMENT=str.maketrans('ACGTN','TGCAN')
 
@@ -63,7 +64,7 @@ def validated_columns(record, reference):
 
 def summarize_quality(reference, reference_sequence, records, source_runs):
     source_by_id={r['read_id']:r for r in source_runs}
-    sources=[];calls=defaultdict(list)
+    sources=[];calls=defaultdict(list);indels=[]
     reference_valid=isinstance(reference_sequence,str) and len(reference_sequence)==reference['length_bp'] and sha256(reference_sequence.encode()).hexdigest()==reference['sha256']
     for record in records:
         source=source_by_id[record['id']]
@@ -75,6 +76,7 @@ def summarize_quality(reference, reference_sequence, records, source_runs):
         sources.append({'read_id':record['id'],'alignment_id':record.get('alignment_id'),
                         'filename':record['original_filename'],'included':reason is None,'reason':reason})
         if columns is None:continue
+        indels.extend(review_indels(record,reference_sequence,reference['topology'],columns))
         for pos,original,ref,call,q in columns:
             if ref not in 'ACGT' or call not in 'ACGT' or q is None or q<20:continue
             calls[pos].append({'read_id':record['id'],'alignment_id':record['alignment_id'],'run_number':record['run_number'],
@@ -99,4 +101,7 @@ def summarize_quality(reference, reference_sequence, records, source_runs):
             'non_reference_position_count':len(differences),'differences':differences,
             'conflict_position_count':len(conflicts),'conflict_intervals':intervals(conflicts),
             'indel_conflicts':'not_evaluated','consensus':'not_generated',
+            'indel_review':{'method':'saved_event_q20_flank_audit_v1','events':indels,
+                            'eligible_event_count':sum(e['eligible_for_exact_anchor_review'] for e in indels),
+                            'normalization':'not_performed','cross_read_comparison':'not_performed'},
             'source_files_rechecked':False,'whole_reference_verified':False}

@@ -295,3 +295,26 @@ outer digest itself. The export records that method, full digest and timestamp.
 This is content integrity, not a signature or a biological validation verdict.
 It exports the latest run per read rather than every historical run. Use each
 read's historical report export when a different saved run is required.
+
+## Inspect insertion and deletion anchors
+
+`quality_review.indel_review` groups contiguous saved insertion/deletion entries
+for reads whose base mappings passed validation. Each event retains its source
+run and variant indices, sequence, reference boundary/segments, original inserted
+positions/qualities and both mapped flanks. The UI shows a schematic and links
+the flanks back to the original chromatogram, including reverse-read coordinates.
+
+An event meets the current exact-anchor checks only when both flanks are
+unambiguous reference matches at Q20+, inserted calls also meet Q20, and the
+original-read coordinate walk forms a single simple gap. Missing flanks,
+ambiguous/low-quality calls, inconsistent or duplicated saved entries, and
+possible equivalent one-base shifts in repeats are withheld with reasons.
+Deletion bases have no directly measured per-base Phred; flank quality must not
+be relabeled as deletion quality. Linear ends never acquire a fabricated
+opposite flank, and circular origin events preserve split reference segments.
+
+This is **event/anchor inspection only**. No event normalization or cross-read
+indel comparison is performed, and `indel_conflicts` remains `not_evaluated`.
+Passing these checks is not a variant-confidence score or a consensus verdict.
+The complete audit is included in group JSON and the HTML's full snapshot;
+original saved reports are not rewritten.
