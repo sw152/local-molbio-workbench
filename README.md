@@ -346,3 +346,9 @@ atomic claims, expiring leases, fenced completion, bounded retries and cancellat
 with persisted attempt history. Existing synchronous analyses remain unchanged.
 This is a single-host SQLite foundation: no sequencing adapter, batch UI or daemon
 is started. See [queue interfaces and execution limits](docs/job-queue.zh-CN.md).
+
+A first **input-check-only** adapter can now inspect registered AB1 files through
+`python -m localmolbio.worker enqueue-check` and `python -m localmolbio.worker once`.
+It verifies saved reference identity and on-disk file hashes, renews its lease and
+records failures without publishing results from expired workers. It does **not**
+perform sequence analysis. See [one-shot worker usage and limits](docs/input-check-worker.zh-CN.md).
