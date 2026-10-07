@@ -31,7 +31,7 @@ def ready(tmp_path, monkeypatch):
         assert client.post('/api/imports/benchling',files={'file':('fixture.zip',archive.getvalue())}).status_code==201
         sequence=client.get('/api/sequences').json()[0]['id']
         revision=client.get(f'/api/sequences/{sequence}/revisions').json()[0]['id']
-        read=client.post('/api/sanger-reads',data={'sequence_revision_id':revision},files={'file':('trace.ab1',synthetic_ab1(reference[50:250],[38]*200,trace=True))}).json()['id']
+        read=client.post('/api/sanger-reads',data={'sequence_revision_id':revision},files={'file':('trace.ab1',synthetic_ab1(reference[50:250],[8]*10+[38]*170+[8]*20,trace=True))}).json()['id']
         yield client,read,revision
 
 
@@ -121,3 +121,27 @@ def test_simultaneous_analysis_requests_save_exactly_one_run(ready,monkeypatch):
         assert sorted(f.result().status_code for f in futures)==[201,409]
     assert client.get(f'/api/sanger-reads/{read}/analyses').json()['total']==1
     assert len(client.get('/api/jobs').json())==1
+
+
+def test_trimmed_run_records_interval_and_preserves_untrimmed_history(ready):
+    client,read,revision=ready
+    first=client.post('/api/sanger-verifications',json={'sequencing_read_id':read}).json()
+    before=client.get(f'/api/sanger-reads/{read}/analyses').json()['items'][0]
+    result=client.post('/api/sanger-verifications',json={'sequencing_read_id':read,'previous_alignment_id':first['id'],'trim_quality_threshold':20})
+    assert result.status_code==201,result.text
+    report=result.json();evidence=report['evidence']
+    assert evidence['trimming']['original_read_start']==10
+    assert evidence['trimming']['original_read_end']==180
+    assert evidence['read_aligned_fraction']==.85
+    assert evidence['retained_read_aligned_fraction']==1
+    assert evidence['parameters']['trim_quality_threshold']==20
+    assert client.get(f'/api/sanger-reads/{read}/analyses?offset=1').json()['items']==[before]
+    with connect() as db:
+        params=json.loads(db.execute('SELECT parameters_json FROM analysis_jobs WHERE id=?',(report['job_id'],)).fetchone()[0])
+        assert params['trim_quality_threshold']==20
+        assert params['trimming']=='terminal_bases_below_phred_threshold_v1'
+        assert len(json.loads(db.execute('SELECT qualities_json FROM sequencing_reads').fetchone()[0]))==200
+    for invalid in (0,61,True,20.5,'20',60):
+        response=client.post('/api/sanger-verifications',json={'sequencing_read_id':read,'previous_alignment_id':report['id'],'trim_quality_threshold':invalid})
+        assert response.status_code==422,response.text
+    assert client.get(f'/api/sanger-reads/{read}/analyses').json()['total']==2

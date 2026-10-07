@@ -53,6 +53,7 @@ class PrimerSelectionInput(BaseModel):
 class SangerVerificationInput(BaseModel):
     sequencing_read_id: str
     previous_alignment_id: Optional[str] = None
+    trim_quality_threshold: Optional[int] = Field(default=None, ge=1, le=60, strict=True)
     direction: Optional[Literal["forward", "reverse", "unknown"]] = None
 
 
@@ -668,16 +669,17 @@ def create_sanger_verification(request: SangerVerificationInput) -> dict[str, ob
     started = _utc_now()
     try:
         result = align_sanger_read(row["sequence_text"], parsed.sequence, direction,
-                                   row["topology"] == "circular", qualities=parsed.qualities or None)
+                                   row["topology"] == "circular", qualities=parsed.qualities or None,
+                                   trim_quality_threshold=request.trim_quality_threshold)
     except SangerVerificationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Alignment engine failed; existing reports were preserved") from exc
     job_id, alignment_id, now = str(uuid4()), str(uuid4()), _utc_now()
     report = {key: getattr(result, key) for key in ("reference_start", "reference_end", "wraps_origin", "aligned_bases", "matched_bases", "mismatched_bases", "inserted_bases", "deleted_bases", "identity_fraction", "variants", "evidence")}
-    parameters = {**ALIGNMENT_PARAMETERS, "requested_direction": direction,
+    parameters = {**result.evidence["parameters"], "requested_direction": direction,
                   "original_read_direction": row["direction"], "quality_source": "hash_checked_original_ab1",
-                  "reference_topology": row["topology"], "trimming": "none"}
+                  "reference_topology": row["topology"]}
     result.evidence["parameters"] = parameters
     summary = {"identity_fraction": result.identity_fraction, "variant_count": len(result.variants), "evidence": result.evidence}
     with connect() as connection:

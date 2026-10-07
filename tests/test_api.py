@@ -146,7 +146,7 @@ def test_sanger_evidence_survives_reload_and_records_inputs(tmp_path, monkeypatc
         assert client.get("/api/sanger-reads/missing/trace").status_code == 404
         with connect() as db:
             job = db.execute("SELECT * FROM analysis_jobs WHERE job_kind = 'sanger-verification'").fetchone()
-            assert json.loads(job["parameters_json"])["evidence_version"] == 2
+            assert json.loads(job["parameters_json"])["evidence_version"] == 3
             assert json.loads(job["input_manifest_json"])["read_sha256"] == uploaded.json()["file_sha256"]
             assert len(json.loads(db.execute("SELECT qualities_json FROM sequencing_reads").fetchone()[0])) == 30
             stored = db.execute("SELECT storage_path FROM sequencing_reads").fetchone()[0]

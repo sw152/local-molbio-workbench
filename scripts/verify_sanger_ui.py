@@ -43,6 +43,11 @@ quality = [38] * len(read)
 quality[200] = 12
 read_path = artifacts / "synthetic-Q12.ab1"
 read_path.write_bytes(synthetic_ab1("".join(read), quality, trace=True))
+trim_calls=list(reference[300:900])
+trim_calls[180]=next(b for b in 'ACGT' if b!=trim_calls[180])
+trim_quality=[5]*20+[38]*550+[8]*30;trim_quality[180]=12
+trim_path=artifacts/'synthetic-reverse-trim.ab1'
+trim_path.write_bytes(synthetic_ab1(str(Seq(''.join(trim_calls)).reverse_complement()),trim_quality[::-1],trace=True))
 invalid = artifacts / "invalid.ab1"
 invalid.write_bytes(b"invalid data")
 with socket.socket() as s:
@@ -171,6 +176,56 @@ try:
         assert page.locator('#map-panel').evaluate('(el)=>el.scrollWidth<=el.clientWidth+1')
         page.get_by_role('button',name='Newer runs').click()
         expect(page.locator('.history-runs button')).to_have_count(5)
+        # Real binary ABIF: reverse-oriented read with asymmetric low-quality ends.
+        page.set_viewport_size({'width':1440,'height':1080})
+        page.locator('#sanger-file').set_input_files(str(trim_path))
+        page.get_by_role('button',name='Attach AB1',exact=True).click()
+        trim_card=page.locator('.read-card').filter(has_text=trim_path.name)
+        expect(trim_card).to_have_count(1)
+        expect(trim_card.locator('[data-analysis-trim]')).to_have_value('')
+        trim_card.get_by_role('button',name='Analyze against this revision').click()
+        expect(trim_card.locator('.analysis-version')).to_contain_text('Run 1 · Latest')
+        expect(trim_card.locator('.trim-off')).to_contain_text('all 600 original bases')
+        trim_card.locator('[data-analysis-trim]').select_option('20')
+        with page.expect_response('**/api/sanger-verifications') as trim_response:
+            trim_card.get_by_role('button',name='Run new analysis',exact=True).click()
+        trim_report=trim_response.value.json()
+        assert trim_response.value.status==201
+        assert trim_report['evidence']['direction']=='reverse'
+        assert trim_report['evidence']['read_aligned_fraction']==.916667
+        assert trim_report['evidence']['retained_read_aligned_fraction']==1
+        assert trim_report['variants'][0]['original_read_position']==419
+        expect(trim_card.locator('.trim-evidence')).to_contain_text('550 / 600 bases retained')
+        expect(trim_card.locator('.trim-evidence')).to_contain_text('excluded 30 left / 20 right')
+        expect(trim_card.locator('.read-metrics')).to_contain_text('91.7%')
+        expect(trim_card.locator('.read-flags')).to_contain_text('below Q20')
+        trim_card.locator('.variant-details summary').click()
+        expect(trim_card.locator('.variant-scroll tbody')).to_contain_text('481')
+        expect(trim_card.locator('.variant-scroll tbody')).to_contain_text('420')
+        trim_card.locator('.variant-scroll .trace-jump').click()
+        expect(trim_card.locator('.trace-selected')).to_have_attribute('data-peak-position','419')
+        trim_card.locator('.analysis-report').screenshot(path=str(artifacts/'trim-report-desktop.png'))
+        trim_card.locator('.trim-evidence .trace-jump').first.click()
+        expect(trim_card.locator('.trace-selected')).to_have_attribute('data-peak-position','30')
+        trim_card.get_by_role('button',name='Browse saved analyses').click()
+        trim_card.locator('.history-runs button').filter(has_text='Run 1').click()
+        expect(trim_card.locator('.trim-off')).to_contain_text('all 600 original bases')
+        expect(trim_card.locator('.trim-evidence')).to_have_count(0)
+        trim_card.get_by_role('button',name='Show latest report').click()
+        expect(trim_card.locator('.trim-evidence')).to_be_visible()
+        page.reload();page.get_by_role('button',name='Open map').click()
+        expect(trim_card.locator('[data-analysis-trim]')).to_have_value('20')
+        expect(trim_card.locator('.trim-evidence')).to_contain_text('550 / 600 bases retained')
+        page.set_viewport_size({'width':390,'height':844})
+        trim_card.locator('.analysis-version').evaluate('(el)=>el.scrollIntoView({block:"start"})')
+        page.screenshot(path=str(artifacts/'trim-report-mobile.png'))
+        trim_card.locator('.variant-details summary').click()
+        trim_card.locator('.variant-scroll .trace-jump').click()
+        expect(trim_card.locator('.trace-selected')).to_have_attribute('data-peak-position','419')
+        trim_card.locator('.trace-view').evaluate('(el)=>el.scrollIntoView({block:"start"})')
+        page.screenshot(path=str(artifacts/'trim-trace-mobile.png'))
+        assert trim_card.locator('.trace-selected').evaluate('(el)=>{const r=el.getBoundingClientRect();const s=el.closest(".trace-scroll").getBoundingClientRect();return r.left>=s.left&&r.right<=s.right;}')
+        assert page.locator('#map-panel').evaluate('(el)=>el.scrollWidth<=el.clientWidth+1')
         # Optional externally supplied public ABI fixture; never bundled or committed.
         public_fixture = os.environ.get('MOLBIO_PUBLIC_AB1')
         if public_fixture:
@@ -193,7 +248,7 @@ try:
         expect(page.locator('#sanger-status')).to_contain_text('Could not load reads')
         assert not errors, errors
         browser.close()
-    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['binary ABIF upload','invalid and duplicate upload','analysis and persisted evidence','append-only rerun and historical report switching','six-run history pagination','history network failure and stale rerun recovery','Q12 variant and focused chromatogram','desktop and mobile layouts','network failure','no JS exceptions']},indent=2))
+    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['binary ABIF upload','invalid and duplicate upload','analysis and persisted evidence','append-only rerun and historical report switching','six-run history pagination','optional end trimming with original and retained coverage','reverse trimmed variant and boundary jump to original peaks','history network failure and stale rerun recovery','Q12 variant and focused chromatogram','desktop and mobile layouts','network failure','no JS exceptions']},indent=2))
 finally:
     server.terminate()
     server.wait(timeout=10)

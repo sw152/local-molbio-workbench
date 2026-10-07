@@ -62,8 +62,23 @@ High identity alone does not verify the whole plasmid.
 can change the requested orientation for the new run; the upload metadata stays
 unchanged. “Browse saved analyses” pages through history and opens old coverage
 and difference reports, clearly labeled as historical. Each new report records its
-method version, effective parameters, input hashes and predecessor. No quality
-trimming is applied yet.
+method version, effective parameters, input hashes and predecessor.
+
+End quality trimming is optional and defaults to off. When enabled, it removes
+only the contiguous end calls below the chosen Phred threshold, stopping at the
+first passing call on each side. Interior low-quality and ambiguous calls remain
+in the retained interval and in the evidence. This is a simple endpoint rule,
+not a sliding-window, Mott or mixed-peak quality algorithm. Fewer than 12 retained
+bases, missing qualities or invalid thresholds are rejected without saving a report.
+
+The report records the retained original-read interval, left/right exclusions,
+method and threshold. It separately displays aligned fractions of the **original**
+read and **retained** interval; a high retained fraction cannot establish full-read
+or whole-plasmid verification. The trim bar always follows the original uploaded
+orientation. Both retained boundary buttons and variant links open the original
+chromatogram, including for reverse alignments. Original calls, qualities and files
+are never trimmed in storage. Older reports without these fields remain marked as
+unrecorded rather than being silently recalculated.
 
 Every run reparses the hash-checked original AB1 and requires its calls and existing
 saved qualities to agree. Missing historical per-base qualities can be recovered
@@ -72,7 +87,13 @@ leave saved reports intact. Existing one-report databases migrate additively int
 analysis history on startup, preserving the legacy table and identifiers.
 
 API: `POST /api/sanger-verifications` accepts `sequencing_read_id`, optional
-`direction`, and `previous_alignment_id` (the latest report ID, required for reruns).
+`direction`, optional `trim_quality_threshold` (integer 1–60; null/off by default),
+and `previous_alignment_id` (the latest report ID, required for reruns).
+Evidence version 3 keeps `read_position`/`read_start`/`read_end` on the full oriented
+original read; `analysis_read_position` is relative to the retained, oriented read.
+`original_read_position` and the trimming interval use original uploaded coordinates,
+all zero-based. `read_aligned_fraction` always uses the original length as denominator;
+`retained_read_aligned_fraction` uses the retained length.
 Stale predecessors return 409, including when another request finishes first.
 `GET /api/sanger-reads/{id}/analyses?limit=10&offset=0` returns newest-first reports
 with pagination metadata. The revision read list continues to show one row per
