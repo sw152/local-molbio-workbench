@@ -37,7 +37,7 @@ For the complete Tailscale SSH, Serve, and future remote-worker setup, read [the
 - Circular/linear sequence metadata and GenBank feature counts
 - Per-record parser-warning retention for annotation review
 - Searchable local sequence inventory
-- Circular plasmid-map preview with feature tracks and source-coordinate review status
+- Circular and linear maps with strand arrows, coordinate ticks, overlap-aware tracks, zoom and focused annotation review
 - Primer3-backed PCR candidate generation with persisted design parameters and evidence
 - Revision-scoped AB1 upload, local Sanger alignment, coverage and quality-aware difference review
 - Windowed four-channel chromatograms, original-read navigation, and jumps from differences to their peak evidence
@@ -64,3 +64,16 @@ Chromium (install the latter with `python -m playwright install chromium` if nee
 Its synthetic files, isolated database, logs and screenshots remain under `var/ui-check/`.
 Set `MOLBIO_PUBLIC_AB1` to a separately acquired public fixture path to additionally
 validate its upload and trace display.
+
+## Inspect sequence maps
+
+Select a feature in the diagram or annotation list to inspect its coordinates.
+Overlapping annotations occupy separate tracks; compound features retain their
+segments on one track. For a crowded map, “Focus selected” isolates one annotation
+while preserving the complete list; “Show all” restores the overview. Zoom and Fit
+control the diagram. Narrow linear diagrams scroll horizontally to retain readable labels.
+Tick labels are zero-based boundary positions; annotation ranges are one-based base positions.
+Unknown topology uses a clearly labeled linear coordinate view.
+
+Geometry checks: `node --test tests/ui/sequence-map.test.cjs`.
+Browser checks: `python scripts/verify_sequence_map_ui.py` with the UI dependencies above.
