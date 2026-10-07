@@ -486,7 +486,8 @@ try:
         expect(comparison).to_contain_text('Conflicting event / reference support')
         expect(comparison.locator('.indel-support-counts')).to_contain_text('1Event-supporting reads')
         expect(comparison.locator('.indel-support-counts')).to_contain_text('2Reference-supporting reads')
-        expect(comparison.locator('.indel-support-counts')).to_contain_text('1Unassessed reads')
+        unassessed_count=1+int(bool(public_fixture))
+        expect(comparison.locator('.indel-support-counts')).to_contain_text(f'{unassessed_count}Unassessed reads')
         expect(comparison.locator('li').filter(has_text=high_path.name)).to_contain_text('not fully observed')
         comparison.screenshot(path=str(artifacts/'indel-comparison-desktop.png'))
         comparison.locator('li').filter(has_text=read_path.name).get_by_role('button',name='Left · read 500').click()
@@ -512,12 +513,16 @@ try:
         group_evidence=json.loads(indel_export_path.read_text())['snapshot']['summary']['quality_review']
         assert group_evidence['indel_conflicts']=='exact_event_vs_reference_only'
         assert group_evidence['indel_review']['comparisons'][0]['reference_read_count']==2
+        if public_fixture:
+            public_source=next(s for s in group_evidence['indel_review']['comparisons'][0]['sources'] if s['filename']==public_path.name)
+            assert public_source['support']=='unassessed' and public_source['reason']
+            assert group_evidence['indel_review']['comparisons'][0]['unassessed_read_count']==unassessed_count
         with page.expect_download() as indel_html:
             page.get_by_role('button',name='Group HTML',exact=True).click()
         indel_html_path=artifacts/'indel-comparison.html';indel_html.value.save_as(str(indel_html_path))
         indel_offline=browser.new_context(offline=True,viewport={'width':1100,'height':1000})
         indel_page=indel_offline.new_page();indel_page.goto(indel_html_path.as_uri())
-        expect(indel_page.locator('.indel-comparison-report')).to_contain_text('1 event / 2 reference / 1 unassessed')
+        expect(indel_page.locator('.indel-comparison-report')).to_contain_text(f'1 event / 2 reference / {unassessed_count} unassessed')
         indel_page.locator('.indel-comparison-report').screenshot(path=str(artifacts/'indel-comparison-offline.png'))
         indel_offline.close()
 
@@ -529,7 +534,7 @@ try:
         expect(page.locator('#sanger-summary')).to_be_empty()
         assert not errors, errors
         browser.close()
-    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['exact indel vs reference support, unassessed short read, source peak links and offline group report','grouped reverse insertion, Q20 flank audit, original peak jump and snapshot export','group JSON/HTML downloads, offline rendering, stale snapshot rejection and late-response cancellation','quality-filtered multi-read overlap, conflict and original peak navigation','base-level Q20 mapping, reverse original coordinates and historical absence','high-quality difference shown separately from matching evidence','latest-only multi-read coverage, overlap and circular gap review','binary ABIF upload','invalid and duplicate upload','analysis and persisted evidence','append-only rerun and historical report switching','six-run history pagination','optional end trimming with original and retained coverage','historical and current JSON/HTML downloads','offline HTML rendering without external requests','export failure recovery and late-response cancellation','reverse trimmed variant and boundary jump to original peaks','history network failure and stale rerun recovery','Q12 variant and focused chromatogram','desktop and mobile layouts','network failure','no JS exceptions']},indent=2))
+    print(json.dumps({'passed':True,'artifacts':str(artifacts),'public_ab1_checked':bool(public_fixture),'checks':['exact indel vs reference support, unassessed short read, source peak links and offline group report','grouped reverse insertion, Q20 flank audit, original peak jump and snapshot export','group JSON/HTML downloads, offline rendering, stale snapshot rejection and late-response cancellation','quality-filtered multi-read overlap, conflict and original peak navigation','base-level Q20 mapping, reverse original coordinates and historical absence','high-quality difference shown separately from matching evidence','latest-only multi-read coverage, overlap and circular gap review','binary ABIF upload','invalid and duplicate upload','analysis and persisted evidence','append-only rerun and historical report switching','six-run history pagination','optional end trimming with original and retained coverage','historical and current JSON/HTML downloads','offline HTML rendering without external requests','export failure recovery and late-response cancellation','reverse trimmed variant and boundary jump to original peaks','history network failure and stale rerun recovery','Q12 variant and focused chromatogram','desktop and mobile layouts','network failure','no JS exceptions']},indent=2))
 finally:
     server.terminate()
     server.wait(timeout=10)
