@@ -24,11 +24,12 @@ class FastqLimits:
             raise ValueError('FASTQ limits must be positive integers')
 
 
-def inspect_fastq(path: Path, compressed: bool, quality_encoding: str, limits=FastqLimits()):
+def inspect_fastq(path: Path, compressed: bool, quality_encoding: str, limits=FastqLimits(), pulse=lambda: None):
     if quality_encoding != 'phred33':
         raise FastqError('quality_encoding_must_be_explicit_phred33')
     if path.stat().st_size > limits.raw_bytes:
         raise FastqError('raw_size_limit_exceeded')
+    next_pulse = 0
     decoded = records = bases = ambiguous = n_bases = 0
     min_length = max_length = None
     quality_counts = Counter()
@@ -41,7 +42,10 @@ def inspect_fastq(path: Path, compressed: bool, quality_encoding: str, limits=Fa
             stream = gzip.GzipFile(fileobj=raw, mode='rb') if compressed else raw
             try:
                 def line():
-                    nonlocal decoded
+                    nonlocal decoded, next_pulse
+                    if decoded >= next_pulse:
+                        pulse()
+                        next_pulse = decoded + 65536
                     data = stream.readline(limits.record_bases + 3)
                     decoded += len(data)
                     if decoded > limits.decoded_bytes:

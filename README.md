@@ -381,6 +381,14 @@ An internal minimap2 2.31 core now produces and independently validates local
 base-level alignment evidence for explicit long-read or single-end short-read
 presets. Linear/reverse/circular coordinates, duplicate circular copies and
 ambiguous-base identity denominators have synthetic truth tests using the actual
-aligner. This core is not yet connected to registered FASTQ jobs or the UI; it
-has strict size limits and does not generate consensus or a plasmid pass verdict.
+aligner. The core now connects to registered FASTQ through a snapshot-based queue CLI;
+the alignment UI is still pending. It has strict size limits and does not generate consensus or a plasmid pass verdict.
 See [tool setup, evidence semantics and limits](docs/alignment-evidence-core.zh-CN.md).
+
+
+Use `python -m localmolbio.worker enqueue-alignment` with registered FASTQ IDs
+and an explicit `--data-type`, then `once --adapter alignment`. Configure the
+trusted pinned tool with `MOLBIO_MINIMAP2`. Each attempt copies and validates
+bounded original inputs, preserves file/record ordinals, and rechecks identity
+before fenced publication. Diagnostic files alone do not imply a successful job.
+See [registered FASTQ alignment commands and limits](docs/registered-fastq-alignment.zh-CN.md).

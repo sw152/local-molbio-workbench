@@ -32,3 +32,7 @@ python -m localmolbio.worker once --adapter fastq --worker-id m2-fastq-check --l
 ## 验收
 
 26 项 FASTQ worker 专项测试覆盖普通/gzip 原始字节、完整元数据身份、多文件排序幂等和末项损坏无部分成功、字节/大小/参考/归属/声明/摘要变化、目录边界与非普通文件、读取中变化、JSON 规范化、重试耗尽、取消和过期接管、AB1/FASTQ 领取隔离、未知错误脱敏，以及独立 CLI 进程。输入都是本地合成数据；不代表真实仪器 FASTQ 或大规模测序分析验收。
+
+## 后续比对适配器
+
+输入身份检查的语义不变。真正的有界局部比对使用另一个 adapter，通过 `enqueue-alignment` / `once --adapter alignment` 显式选择，见 [已登记 FASTQ 比对](registered-fastq-alignment.zh-CN.md)。身份检查成功不会自动触发比对。

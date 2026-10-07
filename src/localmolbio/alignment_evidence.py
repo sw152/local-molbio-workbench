@@ -164,13 +164,7 @@ def _file_hash(path):
     return digest.hexdigest()
 
 
-def align(reference, reads, *, topology, data_type, binary, output_dir, pulse=lambda: None, timeout_seconds=60):
-    """Local bounded core. output_dir must be new; no DB job or public API is created."""
-    _validate(reference, reads, topology)
-    if data_type not in PRESETS:
-        raise AlignmentError('explicit_supported_data_type_required')
-    if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 300:
-        raise AlignmentError('timeout_outside_limit')
+def tool_identity(binary):
     binary = Path(binary).resolve(strict=True)
     before = _file_hash(binary)
     try:
@@ -180,6 +174,18 @@ def align(reference, reads, *, topology, data_type, binary, output_dir, pulse=la
         raise AlignmentError('aligner_version_unavailable') from exc
     if version != '2.31-r1302':
         raise AlignmentError('unvalidated_minimap2_version')
+    return binary, {'name': 'minimap2', 'version': version, 'binary_sha256': before}
+
+
+def align(reference, reads, *, topology, data_type, binary, output_dir, pulse=lambda: None, timeout_seconds=60):
+    """Local bounded core. output_dir must be new; no DB job or public API is created."""
+    _validate(reference, reads, topology)
+    if data_type not in PRESETS:
+        raise AlignmentError('explicit_supported_data_type_required')
+    if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 300:
+        raise AlignmentError('timeout_outside_limit')
+    binary, identity = tool_identity(binary)
+    before, version = identity['binary_sha256'], identity['version']
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=False)
     target = reference * (2 if topology == 'circular' else 1)

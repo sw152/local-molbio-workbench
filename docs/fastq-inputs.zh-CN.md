@@ -1,6 +1,6 @@
 # FASTQ 输入登记与流式检查
 
-现在可通过构建详情中的 FASTQ files 面板或 API 为一个参考修订登记原始 FASTQ 文件并获取格式、长度与质量摘要。FASTQ 使用独立的 `fastq_inputs` 表，不将几百万条记录塞入单条 Sanger read，也不会出现在 AB1 峰图或 Sanger 覆盖统计中。已提供 [FASTQ 队列身份复核](fastq-worker.zh-CN.md) 的 Python 接口与 CLI；尚未提供比对、共识或变异分析。
+现在可通过构建详情中的 FASTQ files 面板或 API 为一个参考修订登记原始 FASTQ 文件并获取格式、长度与质量摘要。FASTQ 使用独立的 `fastq_inputs` 表，不将几百万条记录塞入单条 Sanger read，也不会出现在 AB1 峰图或 Sanger 覆盖统计中。已提供 [FASTQ 队列身份复核](fastq-worker.zh-CN.md) 的 Python 接口与 CLI；已另提供 [有界局部比对任务 CLI](registered-fastq-alignment.zh-CN.md)，尚未提供共识或变异分析。
 
 ## 接口与证据
 
@@ -33,7 +33,7 @@
 
 26 项新增测试覆盖 Q19/Q20/Q30、IUPAC 模糊碱基、低质量保留、空文件、序列/质量长度、无效字符、gzip CRC/截断/串联、压缩名不符、各资源上限、并发去重、不同修订、原始字节保留、已有文件被改动时拒绝、清理与分页。尚未用实际仪器 FASTQ 或大规模生产数据做兼容性和性能验收。
 
-FASTQ 队列身份复核已接入，下一步引入真正的长短读分析器。不要把格式检查或 Q20/Q30 数量直接解释成覆盖、测序准确性或质粒通过。
+FASTQ 队列身份复核与有界局部比对 CLI 已接入，下一步补充比对审阅 API/UI。不要把格式检查或 Q20/Q30 数量直接解释成覆盖、测序准确性或质粒通过。
 
 ## 上传和摘要界面
 

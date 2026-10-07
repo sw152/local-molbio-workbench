@@ -61,7 +61,7 @@ def _signature(info):
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
 
-def _hash_managed_file(row, pulse, directory, outside_code, identity_key, expected_size=None):
+def _hash_managed_file(row, pulse, directory, outside_code, identity_key, expected_size=None, sink=None):
     path = Path(row['storage_path'])
     try:
         if path.is_symlink():
@@ -78,13 +78,19 @@ def _hash_managed_file(row, pulse, directory, outside_code, identity_key, expect
             if expected_size is not None and before.st_size != expected_size:
                 raise InputValidationError('input_size_mismatch')
             digest = sha256()
+            copied_bytes = 0
             with os.fdopen(fd, 'rb', closefd=False) as stream:
                 while True:
                     pulse()
                     block = stream.read(1024 * 1024)
                     if not block:
                         break
+                    copied_bytes += len(block)
+                    if expected_size is not None and copied_bytes > expected_size:
+                        raise InputValidationError('input_changed_during_check')
                     digest.update(block)
+                    if sink is not None:
+                        sink.write(block)
             after = os.fstat(fd)
             if path.is_symlink() or _signature(before) != _signature(after) or _signature(after) != _signature(path.stat()):
                 raise InputValidationError('input_changed_during_check')
