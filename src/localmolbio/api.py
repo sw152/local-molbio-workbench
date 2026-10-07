@@ -26,6 +26,7 @@ from .importer import (
     import_benchling_archive,
 )
 from .primer_design import PrimerDesignError, PrimerDesignSettings, design_pcr_primers
+import primer3
 from .sanger import SangerReadError, file_sha256, parse_ab1
 from .sanger_verification import ALIGNMENT_PARAMETERS, SangerVerificationError, align_sanger_read
 
@@ -40,6 +41,8 @@ class PrimerDesignInput(BaseModel):
     min_tm: float = Field(default=57.0, ge=40.0, le=80.0)
     opt_tm: float = Field(default=60.0, ge=40.0, le=80.0)
     max_tm: float = Field(default=63.0, ge=40.0, le=80.0)
+    target_start: Optional[int] = Field(default=None, ge=0)
+    target_end: Optional[int] = Field(default=None, ge=1)
 
 
 class PrimerSelectionInput(BaseModel):
@@ -307,12 +310,19 @@ def export_selected_primers(revision_id: str) -> Response:
             "tm_celsius",
             "gc_percent",
             "source_revision_id",
+            "analysis_job_id",
+            "pair_index",
+            "product_size_bp",
+            "target_start_1_based",
+            "target_end_1_based_inclusive",
+            "specificity_status",
             "created_at",
         ],
     )
     writer.writeheader()
     for row in rows:
         metrics = json.loads(row["metrics_json"])
+        target = metrics.get("target") or {}
         writer.writerow(
             {
                 "name": row["name"] or "",
@@ -324,6 +334,12 @@ def export_selected_primers(revision_id: str) -> Response:
                 "tm_celsius": metrics.get("tm", ""),
                 "gc_percent": metrics.get("gc_percent", ""),
                 "source_revision_id": revision_id,
+                "analysis_job_id": metrics.get("analysis_job_id", ""),
+                "pair_index": metrics.get("pair_index", ""),
+                "product_size_bp": metrics.get("product_size", ""),
+                "target_start_1_based": target["start"] + 1 if "start" in target else "",
+                "target_end_1_based_inclusive": target.get("end", ""),
+                "specificity_status": metrics.get("specificity_status", "not_recorded"),
                 "created_at": row["created_at"],
             }
         )
@@ -345,20 +361,25 @@ def create_primer_design(request: PrimerDesignInput) -> dict[str, object]:
         min_tm=request.min_tm,
         opt_tm=request.opt_tm,
         max_tm=request.max_tm,
+        target_start=request.target_start,
+        target_end=request.target_end,
     )
-    parameters = request.model_dump()
+    parameters = {**request.model_dump(), "engine": "primer3-py", "engine_version": primer3.__version__,
+                  "coordinate_system": "zero-based-half-open", "design_scope": "linear_template_coordinates",
+                  "specificity_status": "not_evaluated", "origin_spanning_supported": False}
     job_id = str(uuid4())
     now = _utc_now()
     with connect() as connection:
         revision = connection.execute(
             """
-            SELECT id, label, sequence_text, sequence_sha256
+            SELECT id, label, sequence_text, sequence_sha256, topology
             FROM sequence_revisions WHERE id = ?
             """,
             (request.sequence_revision_id,),
         ).fetchone()
         if not revision:
             raise HTTPException(status_code=404, detail="Sequence revision not found")
+        parameters["reference_topology"] = revision["topology"]
         connection.execute(
             """
             INSERT INTO analysis_jobs (
@@ -389,6 +410,14 @@ def create_primer_design(request: PrimerDesignInput) -> dict[str, object]:
             )
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    except Exception as exc:
+        with connect() as connection:
+            connection.execute(
+                "UPDATE analysis_jobs SET status = 'failed', error_detail = ?, completed_at = ? WHERE id = ?",
+                (f"{type(exc).__name__}: {exc}", _utc_now(), job_id),
+            )
+        raise HTTPException(status_code=500, detail="Primer design engine failed; no candidates were saved") from exc
+
     created_primers: list[dict[str, object]] = []
     prefix = request.name_prefix or revision["label"]
     with connect() as connection:
@@ -405,6 +434,9 @@ def create_primer_design(request: PrimerDesignInput) -> dict[str, object]:
                     "self_end_th": item["self_end_th"],
                     "product_size": pair["product_size"],
                     "pair_index": pair["pair_index"],
+                    "analysis_job_id": job_id,
+                    "target": pair["target"],
+                    "specificity_status": "not_evaluated",
                 }
                 name = f"{prefix}-{suffix}{pair['pair_index']}"
                 connection.execute(
@@ -439,7 +471,7 @@ def create_primer_design(request: PrimerDesignInput) -> dict[str, object]:
                         "metrics": metrics,
                     }
                 )
-        summary = {"pair_count": len(pairs), "primer_count": len(created_primers)}
+        summary = {"pair_count": len(pairs), "primer_count": len(created_primers), "parameters": parameters}
         connection.execute(
             """
             UPDATE analysis_jobs
@@ -455,7 +487,7 @@ def create_primer_design(request: PrimerDesignInput) -> dict[str, object]:
             """,
             (str(uuid4()), job_id, json.dumps(summary), _utc_now()),
         )
-    return {"job_id": job_id, "pairs": pairs, "primers": created_primers}
+    return {"job_id": job_id, "pairs": pairs, "primers": created_primers, "parameters": parameters}
 
 
 @app.get("/api/sequences/{sequence_id}/map")

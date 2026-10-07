@@ -64,7 +64,7 @@
     try {
       const candidates=await request('/api/revisions/'+encodeURIComponent(id)+'/primers');
       if(version!==mapVersion||id!==revision||requestVersion!==primerVersion)return;
-      $('#primer-results').innerHTML=candidates.length?candidates.map(q=>`<div class="primer"><span><b>${esc(q.name||'Unnamed')}</b><small>${esc(q.direction)} · ${q.binding_start+1}..${q.binding_end}</small></span><code title="${esc(q.sequence_text)}">${esc(q.sequence_text)}</code><span>${Number(q.metrics.tm).toFixed(1)}°<small>${Number(q.metrics.gc_percent).toFixed(1)}% GC</small>${q.selection_state!=='selected'?`<button class="action" data-id="${esc(q.id)}" data-state="selected">Select</button>`:'<small style="color:var(--cyan)">Selected</small>'}${q.selection_state!=='archived'?`<button class="action" data-id="${esc(q.id)}" data-state="archived">Archive</button>`:''}</span></div>`).join(''):'<p class="evidence-note">No candidates saved for this revision.</p>';
+      $('#primer-results').innerHTML=candidates.length?candidates.map(q=>`<div class="primer"><span><b>${esc(q.name||'Unnamed')}</b><small>${esc(q.direction)} · ${q.binding_start+1}..${q.binding_end}</small><small>${q.metrics.target?`Target ${q.metrics.target.start+1}–${q.metrics.target.end} bp`:'Unconstrained placement'} · ${q.metrics.product_size} bp product</small></span><code title="${esc(q.sequence_text)}">${esc(q.sequence_text)}</code><span>${Number(q.metrics.tm).toFixed(1)}°<small>${Number(q.metrics.gc_percent).toFixed(1)}% GC</small>${q.selection_state!=='selected'?`<button class="action" data-id="${esc(q.id)}" data-state="selected">Select</button>`:'<small style="color:var(--cyan)">Selected</small>'}${q.selection_state!=='archived'?`<button class="action" data-id="${esc(q.id)}" data-state="archived">Archive</button>`:''}</span></div>`).join(''):'<p class="evidence-note">No candidates saved for this revision.</p>';
       primerControls();
     } catch(error) {
       if(version===mapVersion&&id===revision&&requestVersion===primerVersion) $('#primer-status').textContent=`Could not load primers: ${error.message}`;
@@ -73,7 +73,7 @@
   function resetConstruct() {
     mapVersion++;primerVersion++;mapController?.abort();revision=null;primerBusy=false;
     window.sangerView.clear();window.sequenceMap.clear();
-    $('#primer-results').replaceChildren();$('#primer-status').textContent='';
+    $('#primer-results').replaceChildren();$('#primer-status').textContent='';$('#primer-design-summary').textContent='';$('#primer-form [name=target_start]').value='';$('#primer-form [name=target_end]').value='';
     $('#map-title').textContent='Loading construct…';$('#map-summary').textContent='';
     primerControls();
   }
@@ -85,6 +85,7 @@
       const m=await request('/api/sequences/'+encodeURIComponent(id)+'/map',{signal:controller.signal});
       if(version!==mapVersion)return;
       revision=m.current_revision_id;
+      $('#primer-form [name=target_start]').max=m.length_bp;$('#primer-form [name=target_end]').max=m.length_bp;
       $('#map-title').textContent=m.display_name;
       $('#map-summary').textContent=`${Number(m.length_bp).toLocaleString()} bp · ${m.topology} · ${m.feature_count} annotated features`;
       $('#map-message').textContent=m.requires_annotation_review?`Annotation review required · ${m.parse_warning_count} parser warning(s) retained.`:'Annotation coordinates parsed without warnings.';
@@ -119,11 +120,16 @@
   };
   $('#primer-form').onsubmit=async e=>{
     e.preventDefault();if(!revision||primerBusy)return;
-    const data=new FormData(e.target),version=mapVersion,id=revision;primerBusy=true;primerControls();$('#primer-status').textContent='Designing primers…';
+    const data=new FormData(e.target),version=mapVersion,id=revision;
+    const first=data.get('target_start'),last=data.get('target_end');
+    if(Boolean(first)!==Boolean(last)) {$('#primer-status').textContent='Enter both target positions or leave both empty.';return;}
+    if(first && Number(first)>Number(last)) {$('#primer-status').textContent='Target first base must not exceed the last base. Origin-spanning targets are not supported.';return;}
+    primerBusy=true;primerControls();$('#primer-design-summary').textContent='';$('#primer-status').textContent='Designing primers…';
     try {
-      const result=await request('/api/primer-designs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sequence_revision_id:id,name_prefix:data.get('name_prefix')||null,product_size_min:+data.get('product_size_min'),product_size_max:+data.get('product_size_max'),num_return:+data.get('num_return')})});
+      const result=await request('/api/primer-designs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sequence_revision_id:id,name_prefix:data.get('name_prefix')||null,product_size_min:+data.get('product_size_min'),product_size_max:+data.get('product_size_max'),num_return:+data.get('num_return'),target_start:first?Number(first)-1:null,target_end:last?Number(last):null})});
       if(version!==mapVersion)return;
-      $('#primer-status').textContent=`Generated ${result.pairs.length} candidate pair(s).`;await primers(id,version);dashboard();
+      $('#primer-status').textContent=result.pairs.length?`Generated ${result.pairs.length} candidate pair(s).`:'No primer pairs met these constraints. Try changing the target or product size range.';
+      $('#primer-design-summary').textContent=(result.parameters.target_start===null?'Unconstrained placement':`Flanking target ${result.parameters.target_start+1}–${result.parameters.target_end} bp`)+' · Linear reference coordinates · Specificity not evaluated';await primers(id,version);dashboard();
     } catch(error) {if(version===mapVersion)$('#primer-status').textContent=`Primer design failed: ${error.message}`;}
     finally {if(version===mapVersion){primerBusy=false;primerControls();}}
   };

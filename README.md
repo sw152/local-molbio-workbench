@@ -38,7 +38,7 @@ For the complete Tailscale SSH, Serve, and future remote-worker setup, read [the
 - Per-record parser-warning retention for annotation review
 - Paginated sequence library with literal name/source search, total counts and recoverable loading errors
 - Circular and linear maps with strand arrows, coordinate ticks, overlap-aware tracks, zoom and focused annotation review
-- Primer3-backed PCR candidate generation with persisted design parameters and evidence
+- Primer3-backed PCR candidate generation, optional target flanking, persisted design parameters and evidence
 - Revision-scoped AB1 upload, local Sanger alignment, coverage and quality-aware difference review
 - Windowed four-channel chromatograms, original-read navigation, and jumps from differences to their peak evidence
 
@@ -84,3 +84,20 @@ late responses from an older search or construct are ignored. The paginated API 
 `offset`, `limit` and `has_more`. The existing `/api/sequences` array response remains
 available for compatibility. Search metacharacters in the paginated endpoint are literal.
 Run `python scripts/verify_library_ui.py` for pagination, stale-response and error-recovery checks.
+
+## Design primers around a target
+
+In the PCR form, enter the first and last target bases (one-based, inclusive),
+or leave both empty for unconstrained placement. Returned oligos must flank the
+entire target and match the reference on their respective strands. Targets require
+space for a primer on either side. Circular-origin-spanning products are not supported;
+circular records currently use their stored linear coordinates for primer design.
+
+The API accepts optional `target_start` and `target_end` as a zero-based half-open
+interval. Saved candidates retain the target, design job, engine version and scope.
+Selected-primer CSV exports also include target coordinates, pair index, product
+length and specificity status. Specificity screening is **not yet evaluated**;
+these are design candidates, not experimentally validated primers.
+
+Run `python scripts/verify_primer_ui.py` to check target entry, actual Primer3
+execution on synthetic data, selection, CSV export and persisted target metadata.
