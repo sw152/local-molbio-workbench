@@ -4,3 +4,5 @@
 @media(max-width:600px){.map-viewport:has(.map-linear-title) #plasmid-map{min-width:620px}.map-viewport:has(.map-linear-title){max-height:330px}}
 
 .map-tick{font-size:13px}
+
+.annotation-warning-heading{margin:0}.annotation-review{margin-top:10px;color:#ead9bc;font-size:.78rem;line-height:1.6}.annotation-review summary{cursor:pointer;font-weight:600}.annotation-review summary:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}.annotation-review p{margin:10px 0}.annotation-review ol{margin:10px 0;padding-left:24px;max-height:240px;overflow:auto;scrollbar-color:#8e7d69 #172235}.annotation-review li{padding:6px 8px;overflow-wrap:anywhere}.annotation-review li+li{border-top:1px solid #d8b77422}

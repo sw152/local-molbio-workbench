@@ -166,3 +166,38 @@ def test_missing_revision_rejected_before_ab1_parse(tmp_path, monkeypatch):
         response = client.post("/api/sanger-reads", data={"sequence_revision_id": "missing"}, files={"file": ("trace.ab1", b"fixture")})
         assert response.status_code == 404
         assert not (tmp_path / "runtime" / "reads").exists()
+
+
+def test_repaired_origin_annotations_keep_raw_text_both_strands_and_warning_details(tmp_path, monkeypatch):
+    import json
+    from io import StringIO
+    from Bio import SeqIO
+    from Bio.Seq import Seq
+    from Bio.SeqRecord import SeqRecord
+    from Bio.SeqFeature import SeqFeature, FeatureLocation, CompoundLocation
+    reference = SeqRecord(Seq('ACGT' * 3), id='wrapped', annotations={'molecule_type':'DNA','topology':'circular'})
+    reference.features = [
+        SeqFeature(CompoundLocation([FeatureLocation(9,12,strand=1),FeatureLocation(0,3,strand=1)]),type='misc_feature'),
+        SeqFeature(CompoundLocation([FeatureLocation(0,2,strand=-1),FeatureLocation(8,12,strand=-1)]),type='misc_feature')]
+    stream = StringIO();SeqIO.write(reference, stream, 'genbank')
+    record = stream.getvalue().replace('join(10..12,1..3)', '10..3').replace('complement(join(9..12,1..2))','complement(9..2)')
+    archive = BytesIO()
+    with ZipFile(archive, 'w') as z:
+        z.writestr('synthetic.gb', record)
+    monkeypatch.setenv('MOLBIO_DATA_DIR', str(tmp_path / 'runtime'))
+    with TestClient(app) as client:
+        imported = client.post('/api/imports/benchling', files={'file': ('synthetic.zip', archive.getvalue(), 'application/zip')})
+        assert imported.status_code == 201
+        assert imported.json()['parse_warning_count'] == 2
+        sequence = client.get('/api/sequences').json()[0]['id']
+        expected = [[{'start':9,'end':12,'strand':1},{'start':0,'end':3,'strand':1}],
+                    [{'start':0,'end':2,'strand':-1},{'start':8,'end':12,'strand':-1}]]
+        for legacy in [False, True]:
+            if legacy:
+                with connect() as db: db.execute('UPDATE sequences SET features_json = ?', ('[]',))
+            result = client.get(f'/api/sequences/{sequence}/map').json()
+            assert result['requires_annotation_review']
+            assert len(json.loads(result['parse_warnings_json'])) == 2
+            assert [feature['segments'] for feature in result['features']] == expected
+            with connect() as db:
+                assert db.execute('SELECT raw_genbank FROM sequences WHERE id=?', (sequence,)).fetchone()[0] == record

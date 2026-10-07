@@ -89,7 +89,7 @@
       $('#primer-form [name=target_start]').max=m.length_bp;$('#primer-form [name=target_end]').max=m.length_bp;
       $('#map-title').textContent=m.display_name;
       $('#map-summary').textContent=`${Number(m.length_bp).toLocaleString()} bp · ${m.topology} · ${m.feature_count} annotated features`;
-      $('#map-message').textContent=m.requires_annotation_review?`Annotation review required · ${m.parse_warning_count} parser warning(s) retained.`:'Annotation coordinates parsed without warnings.';
+      $('#map-message').innerHTML=window.sequenceMap.annotationReview(m);
       $('#map-message').className=m.requires_annotation_review?'alert warning':'alert';
       window.sequenceMap.render(m);window.sangerView.open(revision,m.length_bp);window.inputJobs.open(revision);window.fastqInputs.open(revision);window.alignmentJobs.open(revision);primerControls();
       await primers(revision,version);

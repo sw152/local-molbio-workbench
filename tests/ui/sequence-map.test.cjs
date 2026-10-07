@@ -41,3 +41,18 @@ test('ticks are ascending, bounded and distinct for small and large sequences',(
  const ticks=map.ticks(length);assert.equal(ticks[0],0);assert(ticks.every(t=>t>=0&&t<length));assert.equal(new Set(ticks).size,ticks.length);
  }
 });
+
+test('stored annotation warnings are inspectable, escaped and explicitly parsed evidence',()=>{
+ const html=map.annotationReview({requires_annotation_review:true,parse_warning_count:2,parse_warnings_json:JSON.stringify(['Repair complement(1101..70)','<img src=x onerror=alert(1)>'])});
+ assert.match(html,/2 parser warning/);assert.match(html,/Repair complement\(1101\.\.70\)/);
+ assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img/);
+ assert.match(html,/parser output/);assert.match(html,/not the original location text/);
+});
+test('missing or malformed legacy warning details cannot clear annotation review',()=>{
+ for(const value of ['bad json','{}','[null,7]','[]',null]) {
+ const html=map.annotationReview({requires_annotation_review:true,parse_warning_count:1,parse_warnings_json:value});
+ assert.match(html,/Annotation review required/);assert.match(html,/details are unavailable/);
+ assert.doesNotMatch(html,/parsed without warnings/);
+ }
+ assert.equal(map.annotationReview({requires_annotation_review:false}),'Annotation coordinates parsed without warnings.');
+});

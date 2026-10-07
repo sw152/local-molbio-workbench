@@ -21,7 +21,7 @@ artifacts.mkdir(parents=True)
 def feature(start,end,strand,label,kind='CDS'):
     return SeqFeature(FeatureLocation(start,end,strand=strand),type=kind,qualifiers={'label':[label]})
 records=[]
-for name,topology in [('pCircular-demo','circular'),('linear-demo','linear'),('crowded-demo','circular'),('unknown-demo',None)]:
+for name,topology in [('pCircular-demo','circular'),('linear-demo','linear'),('crowded-demo','circular'),('unknown-demo',None),('repaired-demo','circular')]:
     record=SeqRecord(Seq('ACGT'*300),id=name,name=name,description='Synthetic map regression',annotations={'molecule_type':'DNA'})
     if topology:record.annotations['topology']=topology
     record.features=[feature(0,1200,None,'Source','source'),feature(80,420,1,'Reporter'),feature(300,650,-1,'Reverse marker'),feature(700,810,1,'Promoter','promoter'),feature(850,1100,None,'Origin','rep_origin')]
@@ -29,11 +29,17 @@ for name,topology in [('pCircular-demo','circular'),('linear-demo','linear'),('c
         record.features.append(SeqFeature(CompoundLocation([FeatureLocation(1100,1200,strand=1),FeatureLocation(0,70,strand=1)]),type='CDS',qualifiers={'label':['Across origin']}))
     if name=='crowded-demo':
         record.features += [feature(150+i,1000-i,1 if i%2 else -1,f'Overlapping feature {i+1}') for i in range(65)]
+    if name=='repaired-demo':
+        record.features.append(SeqFeature(CompoundLocation([FeatureLocation(0,90,strand=-1),FeatureLocation(1000,1200,strand=-1)]),type='CDS',qualifiers={'label':['Reverse across origin']}))
     records.append(record)
 archive=artifacts/'maps.zip'
 with zipfile.ZipFile(archive,'w') as z:
     for record in records:
-        stream=io.StringIO();SeqIO.write(record,stream,'genbank');z.writestr(record.name+'.gb',stream.getvalue())
+        stream=io.StringIO();SeqIO.write(record,stream,'genbank');raw=stream.getvalue()
+        if record.name=='repaired-demo':
+            assert 'join(1101..1200,1..70)' in raw and 'complement(join(1001..1200,1..90))' in raw
+            raw=raw.replace('join(1101..1200,1..70)','1101..70').replace('complement(join(1001..1200,1..90))','complement(1001..90)')
+        z.writestr(record.name+'.gb',raw)
 with socket.socket() as socket_:
     socket_.bind(('127.0.0.1',0));port=socket_.getsockname()[1]
 base=f'http://127.0.0.1:{port}'
@@ -57,12 +63,32 @@ try:
         page.goto(base)
         page.locator('#archive').set_input_files(str(archive))
         page.get_by_role('button',name='Import into local library').click()
-        expect(page.locator('#status')).to_contain_text('Imported 4 records')
+        expect(page.locator('#status')).to_contain_text('Imported 5 records')
         def open_map(name):
             page.locator('.seq').filter(has_text=name).get_by_role('button',name='Open map').click()
             expect(page.locator('#map-title')).to_have_text(name)
             expect(page.locator('#map-layout-note')).to_contain_text('annotation tracks')
+        open_map('repaired-demo')
+        expect(page.locator('#map-message')).to_contain_text('2 parser warning(s) retained')
+        page.locator('.annotation-review summary').click()
+        expect(page.locator('.annotation-review li')).to_have_count(2)
+        expect(page.locator('.annotation-review')).to_contain_text('1101..70')
+        expect(page.locator('.annotation-review')).to_contain_text('1001..90')
+        expect(page.locator('.annotation-review')).to_contain_text('parser output')
+        page.locator('#feature-legend button').filter(has_text='Reverse across origin').click()
+        expect(page.locator('#map-selection')).to_contain_text('1–90 bp, strand −')
+        expect(page.locator('#map-selection')).to_contain_text('1001–1200 bp, strand −')
+        expect(page.locator('#map-selection')).to_contain_text('Parsed location (0-based)')
+        expect(page.locator('#plasmid-map .map-selected path')).to_have_count(2)
+        snapshot('repaired-origin-desktop.png')
+        page.set_viewport_size({'width':390,'height':844})
+        page.locator('#map-panel').evaluate('(el)=>el.scrollTop=0')
+        snapshot('repaired-origin-mobile.png')
+        assert page.locator('#map-panel').evaluate('(el)=>el.scrollWidth<=el.clientWidth+1')
+        page.locator('#close-map').click()
+        page.set_viewport_size({'width':1440,'height':1080})
         open_map('pCircular-demo')
+        expect(page.locator('.annotation-review')).to_have_count(0)
         expect(page.locator('#plasmid-map .map-feature')).to_have_count(6)
         page.locator('#feature-legend button').filter(has_text='Across origin').click()
         expect(page.locator('#map-selection')).to_contain_text('1101–1200 bp')
@@ -114,6 +140,6 @@ try:
         expect(page.locator('#map-zoom-in')).to_be_disabled()
         assert not errors,errors
         browser.close()
-    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['circular origin feature','linear strands','unknown topology','71 annotations','keyboard selection','zoom and fit','390px viewport','no JS errors']},indent=2))
+    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['inspect repaired origin warnings without changing raw records','forward/reverse repaired geometry','no stale warning details','circular origin feature','linear strands','unknown topology','71 annotations','keyboard selection','zoom and fit','390px viewport','no JS errors']},indent=2))
 finally:
     server.terminate();server.wait(timeout=10);log.close()

@@ -73,6 +73,13 @@
     geometry.entries.forEach(entry=>parts.push(featureGraphic(entry,entry.segments.map(s=>linearRibbon(s,112+entry.lane*30,length)).join(''))));
     return {width:800,height,markup:parts.join('')};
   }
+  function annotationReview(model) {
+    if(!model.requires_annotation_review) return 'Annotation coordinates parsed without warnings.';
+    let messages=[];
+    try {const parsed=JSON.parse(model.parse_warnings_json||'[]');if(Array.isArray(parsed)) messages=parsed.filter(value=>typeof value==='string');} catch(_) { /* Preserve the review requirement when legacy details are unavailable. */ }
+    const count=Number.isInteger(model.parse_warning_count)&&model.parse_warning_count>=0?model.parse_warning_count:'Unrecorded';
+    return `<p class="annotation-warning-heading">Annotation review required · ${esc(count)} parser warning(s) retained.</p><details class="annotation-review"><summary>Inspect annotation warnings</summary><p>Map coordinates are parser output. Some locations may have been repaired. Compare these warnings with the original GenBank export before relying on the affected annotations.</p>${messages.length?`<ol>${messages.map(message=>`<li>${esc(message)}</li>`).join('')}</ol>`:'<p>Warning details are unavailable. This does not clear the review requirement.</p>'}<p>Feature selections show parsed locations, not the original location text. The original imported record is retained unchanged.</p></details>`;
+  }
   function clear() {
     const svg=document.getElementById('plasmid-map');
     svg.replaceChildren();svg.onclick=null;svg.onkeydown=null;
@@ -128,12 +135,12 @@
         node.classList.toggle('map-selected',selected);
         node.setAttribute('aria-pressed',String(selected));
       }
-      document.getElementById('map-selection').textContent=`${feature.label} · ${feature.type} · ${feature.segments.map(s=>`${s.start+1}–${s.end} bp, strand ${direction(s)}`).join('; ')}${feature.location_text?' · Source: '+feature.location_text:''}`;
+      document.getElementById('map-selection').textContent=`${feature.label} · ${feature.type} · ${feature.segments.map(s=>`${s.start+1}–${s.end} bp, strand ${direction(s)}`).join('; ')}${feature.location_text?' · Parsed location (0-based): '+feature.location_text:''}`;
     }
     svg.onclick=legend.onclick=select;
     svg.onkeydown=e=>{if(e.key==='Enter'||e.key===' ') {e.preventDefault();select(e);}};
   }
-  const api={layout,overlaps,ticks,ribbon,svgMarkup,render,clear};
+  const api={layout,overlaps,ticks,ribbon,svgMarkup,annotationReview,render,clear};
   if(typeof module!=='undefined'&&module.exports) module.exports=api;
   else root.sequenceMap=api;
 })(typeof window!=='undefined'?window:globalThis);
