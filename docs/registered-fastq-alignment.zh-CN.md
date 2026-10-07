@@ -34,7 +34,7 @@ attempt-result.json 仅为诊断产物，可能在最终提交前丢失租约；
 
 科学/输入不一致和工具进程失败为终止性错误；一般输入/产物 I/O 错误在预算内重试，等待下一次显式 once。未知异常记为 unexpected_alignment_error，避免将异常中的文件路径或序列写入通用任务错误。任务成功设置 analysis_performed=true，scope=registered_fastq_local_alignments_only；consensus_performed、whole_reference_verified 仍为 false。
 
-完整结果包含各读段局部匹配、工具与参数来源及快照索引。当前直接保存有界 JSON 结果，分页 API 读取已提交结果，但尚无覆盖/差异报告、共识或大规模性能承诺。圆形副本、非穷举多重匹配、MAPQ、N 与 gap 分母等边界沿用 [核心语义](alignment-evidence-core.zh-CN.md)。后续科学算法变更需更新适配器/schema 版本，不能静默改写历史结果。
+完整结果包含各读段局部匹配、工具与参数来源及快照索引。当前直接保存有界 JSON 结果，分页 API 读取已提交结果，并提供 [配对位置覆盖审阅](alignment-coverage.zh-CN.md)，但尚无质量感知覆盖/差异报告、共识或大规模性能承诺。圆形副本、非穷举多重匹配、MAPQ、N 与 gap 分母等边界沿用 [核心语义](alignment-evidence-core.zh-CN.md)。后续科学算法变更需更新适配器/schema 版本，不能静默改写历史结果。
 
 ## 验收
 

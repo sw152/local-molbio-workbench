@@ -43,7 +43,7 @@ sources_sha256 是 worker 验证过的原始 sources.json **字节**哈希。数
 
 成功的 scope 为 registered_fastq_local_alignments_only，analysis_performed=true；whole_reference_verified、consensus_performed、base_quality_used、pairing_used 均为 false。坐标为 0 基半开区间，方向相对原始读段。MAPQ 为原始工具值，圆形双拷贝未重新校准；单命中不表示唯一，候选非穷举，局部高 identity 不表示整质粒通过。未报告命中与被 withheld 的命中需审阅，不自动解释为生物学失败。删除不属于 paired_blocks 的覆盖。
 
-分页限制返回的读段数，并未实现数据库增量读取：当前会解析完整的有界 JSON 结果并检查来源映射，再切页；单条复杂命中也可能较大。这不是海量 FASTQ 的内存/延迟或响应字节上限保证。当前没有覆盖总览、质量感知共识、变异报告、账户/项目权限；修订隔离不等同于多人授权。
+分页限制返回的读段数，并未实现数据库增量读取：当前会解析完整的有界 JSON 结果并检查来源映射，再切页；单条复杂命中也可能较大。这不是海量 FASTQ 的内存/延迟或响应字节上限保证。新增 [配对位置总览与区间 API](alignment-coverage.zh-CN.md)，当前没有质量感知共识、变异报告、账户/项目权限；修订隔离不等同于多人授权。
 
 ## 验收
 

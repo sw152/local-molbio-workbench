@@ -16,6 +16,8 @@ with zipfile.ZipFile(archive,'w') as z:
         rec=SeqRecord(Seq(ref),id=name.replace(' ','_'),name=name.replace(' ','_'),annotations={'molecule_type':'DNA','topology':'circular'})
         stream=io.StringIO();SeqIO.write(rec,stream,'genbank');z.writestr(name+'.gb',stream.getvalue())
 reads=[ref[100:500],str(Seq(ref[350:800]).reverse_complement()),ref[-200:]+ref[:200],'A'*350,ref[80:240]+ref[246:520],ref+ref]
+# This repeat permits a one-base left-shift of the same 6-base deletion.
+assert ref[80:239]+ref[245:520] == ref[80:240]+ref[246:520]
 data=''.join(f'@duplicate\n{r}\n+\n'+('I'*len(r))+'\n' for r in reads).encode()
 fastq=artifacts/'synthetic_long_filename_for_alignment_provenance.fastq';fastq.write_bytes(data)
 with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
@@ -63,6 +65,19 @@ try:
         worker();panel.locator('[data-aj-refresh]').click();expect(panel.locator('.ij-succeeded')).to_have_text('Local evidence ready')
         panel.locator('[data-aj-detail]').click();expect(panel.locator('.aj-read')).to_have_count(3)
         expect(panel.locator('.aj-boundary')).to_contain_text('No consensus or whole-plasmid verification')
+        coverage=panel.locator('.aj-coverage')
+        expect(coverage.locator('.aj-coverage-legend').locator('div').nth(0)).to_contain_text('900 bp')
+        expect(coverage.locator('.aj-coverage-legend').locator('div').nth(2)).to_contain_text('0 bp')
+        expect(coverage.locator('.aj-regions')).to_contain_text('No regions in this category')
+        expect(coverage.locator('.aj-coverage-counts')).to_contain_text('6 positions with deletion evidence')
+        coverage.locator('#aj-region-kind').select_option('deletion')
+        expect(coverage.locator('.aj-regions')).to_contain_text('[239, 245)')
+        coverage.scroll_into_view_if_needed();page.screenshot(path=str(artifacts/'alignment-coverage-desktop.png'))
+        coverage.locator('#aj-region-kind').select_option('ambiguous_only')
+        expect(coverage.locator('.aj-regions')).to_contain_text('No regions in this category')
+        coverage.locator('#aj-region-kind').select_option('unpaired')
+        expect(status).to_contain_text('evidence loaded')
+
         expect(panel.locator('.aj-read').nth(0)).to_contain_text('[100, 500)')
         expect(panel.locator('.aj-read').nth(1)).to_contain_text('Reverse')
         expect(panel.locator('.aj-read').nth(2)).to_contain_text('crosses origin')
@@ -84,6 +99,15 @@ try:
         expect(panel.locator('.aj-read')).to_have_count(3)
         page.set_viewport_size({'width':390,'height':844});status.scroll_into_view_if_needed();page.screenshot(path=str(artifacts/'alignment-error-mobile.png'))
         page.unroute('**/alignments?*');panel.locator('[data-aj-refresh]').click();expect(status).to_contain_text('refreshed')
+        coverage.locator('#aj-region-kind').select_option('deletion')
+        expect(coverage.locator('.aj-regions')).to_contain_text('[239, 245)')
+        coverage.scroll_into_view_if_needed();page.screenshot(path=str(artifacts/'alignment-coverage-mobile.png'))
+        assert page.locator('#map-panel').evaluate('(e)=>e.scrollWidth<=e.clientWidth')
+        # Coverage errors preserve previous committed review; next refresh can recover.
+        page.route('**/coverage?*',lambda route:route.fulfill(status=503,json={'detail':'coverage temporarily unavailable'}))
+        panel.locator('[data-aj-refresh]').click();expect(status).to_contain_text('coverage temporarily unavailable')
+        expect(coverage.locator('.aj-regions')).to_contain_text('[239, 245)')
+        page.unroute('**/coverage?*');panel.locator('[data-aj-refresh]').click();expect(status).to_contain_text('refreshed')
         reverse=panel.locator('.aj-read').nth(1);reverse.locator('.aj-source summary').click();reverse.scroll_into_view_if_needed()
         reverse.locator('.aj-diagram').first.hover();page.mouse.wheel(700,0)
         page.wait_for_function('document.querySelectorAll(".aj-read")[1].querySelector(".aj-diagram").scrollLeft>0')
@@ -140,7 +164,7 @@ try:
         panel.scroll_into_view_if_needed();page.screenshot(path=str(artifacts/'alignment-empty-mobile.png'))
         assert not errors,errors
         browser.close()
-    (artifacts/'result.json').write_text(json.dumps({'passed':True,'real_minimap2':True,'synthetic_only':True,'checks':['explicit type','lost response idempotency','real worker','forward/reverse/circular origin evidence','real deletion remains a diagram gap','multi-traversal withheld is distinct from no hit','read/job/input/attempt pagination','cross-page selection','cancel','refresh failure recovery','late detail and submission revision isolation','mobile overflow'],'screenshots':[p.name for p in artifacts.glob('*.png')]},indent=2))
+    (artifacts/'result.json').write_text(json.dumps({'passed':True,'real_minimap2':True,'synthetic_only':True,'checks':['explicit type','lost response idempotency','real worker','forward/reverse/circular origin evidence','real deletion remains a diagram gap','multi-traversal withheld is distinct from no hit','read/job/input/attempt pagination','cross-page selection','cancel','refresh failure recovery','late detail and submission revision isolation','mobile overflow','coverage composition and overlapping deletion evidence','coverage filter and failure recovery'],'screenshots':[p.name for p in artifacts.glob('*.png')]},indent=2))
     print(json.dumps({'artifacts':str(artifacts),'passed':True}))
 finally:
     server.terminate();server.wait(timeout=10);log.close()

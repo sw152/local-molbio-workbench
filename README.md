@@ -394,3 +394,5 @@ before fenced publication. Diagnostic files alone do not imply a successful job.
 See [registered FASTQ alignment commands and limits](docs/registered-fastq-alignment.zh-CN.md).
 
 Revision-scoped [alignment job and evidence APIs](docs/alignment-api.zh-CN.md) expose bounded, registered FASTQ local alignments with read provenance and paginated attempts. The worker runs explicitly. The [alignment review UI](docs/alignment-ui.zh-CN.md) supports submission, cancellation, paginated attempts and read evidence with strand/origin-aware tracks. Consensus and whole-plasmid verification remain pending.
+
+The [paired-position overview](docs/alignment-coverage.zh-CN.md) distinguishes single-reported-hit evidence, alternative-only evidence and gaps, counting each record once across overlapping candidates. Deletion intervals remain separate; quality, uniqueness and independent molecular support are not assessed.

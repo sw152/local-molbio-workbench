@@ -30,9 +30,16 @@
     const d=state.detail,label=d.input_labels[r.source.input_id]||r.source.input_id;
     return `<article class="aj-read"><header><div><span class="eyebrow">Record ${r.source.record_ordinal} · ${esc(r.source.query_name)}</span><h4>${esc(label)}</h4><small>${n(r.length_bp)} bases · ${r.alignments.length} reported alignment${r.alignments.length===1?'':'s'}</small></div><span class="ij-badge aj-review">${r.withheld.length?'Evidence withheld · review':r.alignments.length===0?'No alignment reported':r.alignments.length>1?'Multiple alignments · review':'Local match · uniqueness not assessed'}</span></header>${r.withheld.length?`<p class="ij-error">Withheld evidence: ${r.withheld.map(w=>esc(w.reason.replaceAll('_',' '))).join('; ')}</p>`:''}${!r.alignments.length?'<p class="ij-note">No usable local alignment is reported. Review the input and data type; this is not a whole-plasmid verdict.</p>':''}${r.alignments.map((h,i)=>hitHTML(h,i,d.result.reference_length_bp)).join('')}<details class="aj-source"><summary>Read provenance</summary><p>Input ID <code>${esc(r.source.input_id)}</code><br>File record (1-based) ${r.source.record_ordinal}<br>Uppercase sequence SHA-256 <code>${esc(r.source.sequence_sha256)}</code></p></details></article>`;
   }
+  function coverageHTML(c){
+    if(!c)return '';
+    const s=c.summary,r=c.regions;
+    const bands=[['Single reported hit evidence',s.single_reported_alignment_bases,'single'],['Alternative-only evidence',s.ambiguous_only_bases,'ambiguous'],['No paired evidence',s.unpaired_bases,'unpaired']];
+    const kinds={unpaired:'No paired evidence',ambiguous_only:'Alternative-only evidence',deletion:'Reported deletion positions'};
+    return `<section class="aj-coverage" aria-label="Paired-position overview"><h4>Paired-position overview</h4><p class="ij-note">${n(s.reference_length_bp)} reference bases · each record counted once at each position, across its candidate hits.</p><p class="ij-note">Reference base composition</p><div class="aj-coverage-bar" aria-hidden="true">${bands.map(([label,count,kind])=>`<span class="aj-cov-${kind}" style="width:${count/s.reference_length_bp*100}%"></span>`).join('')}</div><div class="aj-coverage-legend">${bands.map(([label,count,kind])=>`<div><i class="aj-cov-${kind}"></i><span>${label}</span><b>${n(count)} bp</b></div>`).join('')}</div><p class="ij-note">Paired positions include mismatches and N. Quality, uniqueness and independent molecules are not assessed. Single-hit evidence takes precedence where both categories overlap.</p><p class="aj-coverage-counts">${n(s.deletion_evidence_bases)} positions with deletion evidence · ${n(s.read_counts.withheld)} record${s.read_counts.withheld===1?'':'s'} with withheld evidence · ${n(s.read_counts.no_alignment_reported)} record${s.read_counts.no_alignment_reported===1?'':'s'} without reported alignments</p><label for="aj-region-kind">Inspect reference regions</label><select id="aj-region-kind" ${busy?'disabled':''}>${Object.entries(kinds).map(([k,v])=>`<option value="${k}" ${r.kind===k?'selected':''}>${v}</option>`).join('')}</select><p class="ij-note">${r.kind==='deletion'?'Deletion evidence can overlap paired positions from other records. These are reported CIGAR intervals; repeat-equivalent deletions are not normalized or called as consensus.':r.kind==='ambiguous_only'?'Only alternative or partly withheld placement evidence is reported here.':'No reported read base pairs with these positions. This includes uncovered deletion positions.'} Intervals are 0-based, half-open; origin ends are listed separately.</p><div class="aj-regions">${r.items.map(i=>`<div><code>[${n(i.start)}, ${n(i.end)})</code><b>${n(i.length_bp)} bp</b></div>`).join('')||'<p>No regions in this category. This is not a plasmid pass verdict.</p>'}</div>${pager('regions',r,5,'Previous regions','Next regions')}</section>`;
+  }
   function detailHTML(d){
     const result=d.result;
-    return `<header><h4>Alignment review</h4><button data-aj-close ${busy?'disabled':''}>Close alignment review</button></header><p><code>${esc(d.id)}</code> · ${esc(labels[d.status])}</p><p class="ij-note">${esc(types[d.data_type])} · ${esc(d.tool.name)} ${esc(d.tool.version)}</p><details><summary>Reference &amp; input identities</summary><p>Reference SHA-256 <code>${esc(d.reference.sequence_sha256)}</code></p>${d.input_identities.map(i=>`<p><b>${esc(d.input_labels[i.id]||i.id)}</b><br>Original SHA-256 <code>${esc(i.sha256)}</code></p>`).join('')}<p>Tool SHA-256 <code>${esc(d.tool.binary_sha256)}</code></p></details><h4 class="aj-subhead">Attempt history</h4>${d.attempts.items.length?`<ol>${d.attempts.items.map(a=>`<li><b>Attempt ${a.number} · ${esc(a.status)}</b><span>${esc(a.started_at)}</span>${a.error_detail?`<small class="ij-error">${esc(a.error_detail.replaceAll('_',' '))}</small>`:''}</li>`).join('')}</ol>`:'<p class="ij-note">No worker has claimed this task.</p>'}${pager('attempts',d.attempts,3,'Newer attempts','Older attempts')}${result?`<div class="aj-boundary"><b>Local alignments · ${n(result.read_count)} reads</b><p>Base quality and pairing were not used. No consensus or whole-plasmid verification. A single reported match does not establish uniqueness.</p></div><div class="aj-read-list">${state.reads?.items.map(readHTML).join('')||''}</div>${state.reads?pager('reads',state.reads,3,'Previous reads','Next reads'):''}`:'<p class="ij-note">Read evidence appears only after the worker publishes a successful result. Refresh alignment tasks to update.</p>'}`;
+    return `<header><h4>Alignment review</h4><button data-aj-close ${busy?'disabled':''}>Close alignment review</button></header><p><code>${esc(d.id)}</code> · ${esc(labels[d.status])}</p><p class="ij-note">${esc(types[d.data_type])} · ${esc(d.tool.name)} ${esc(d.tool.version)}</p><details><summary>Reference &amp; input identities</summary><p>Reference SHA-256 <code>${esc(d.reference.sequence_sha256)}</code></p>${d.input_identities.map(i=>`<p><b>${esc(d.input_labels[i.id]||i.id)}</b><br>Original SHA-256 <code>${esc(i.sha256)}</code></p>`).join('')}<p>Tool SHA-256 <code>${esc(d.tool.binary_sha256)}</code></p></details><h4 class="aj-subhead">Attempt history</h4>${d.attempts.items.length?`<ol>${d.attempts.items.map(a=>`<li><b>Attempt ${a.number} · ${esc(a.status)}</b><span>${esc(a.started_at)}</span>${a.error_detail?`<small class="ij-error">${esc(a.error_detail.replaceAll('_',' '))}</small>`:''}</li>`).join('')}</ol>`:'<p class="ij-note">No worker has claimed this task.</p>'}${pager('attempts',d.attempts,3,'Newer attempts','Older attempts')}${result?`<div class="aj-boundary"><b>Local alignments · ${n(result.read_count)} reads</b><p>Base quality and pairing were not used. No consensus or whole-plasmid verification. A single reported match does not establish uniqueness.</p></div>${coverageHTML(state.coverage)}<div class="aj-read-list">${state.reads?.items.map(readHTML).join('')||''}</div>${state.reads?pager('reads',state.reads,3,'Previous reads','Next reads'):''}`:'<p class="ij-note">Read evidence appears only after the worker publishes a successful result. Refresh alignment tasks to update.</p>'}`;
   }
   function render(){
     if(!state){root.replaceChildren();return;}
@@ -49,15 +56,16 @@
     const [inputs,jobs]=await Promise.all([request(`${url}/fastq-inputs?limit=5&offset=${inputOffset}`),request(`${url}/alignments?limit=3&offset=${jobOffset}`)]);
     if(token!==generation)return;state.inputs=inputs;state.jobs=jobs;state.loaded=true;
   }
-  async function detail(token,id,attemptOffset=0,readOffset=0){
+  async function detail(token,id,attemptOffset=0,readOffset=0,kind=state.coverage?.regions.kind||'unpaired',regionOffset=0){
     const url=`${base()}/alignments/${encodeURIComponent(id)}`;
     const d=await request(`${url}?limit=3&offset=${attemptOffset}`);
     if(token!==generation)return;
-    const reads=d.result?await request(`${url}/reads?limit=3&offset=${readOffset}`):null;
-    if(token!==generation)return;state.detail=d;state.reads=reads;state.message='Alignment evidence loaded.';
+    const [reads,coverage]=d.result?await Promise.all([request(`${url}/reads?limit=3&offset=${readOffset}`),request(`${url}/coverage?kind=${kind}&limit=5&offset=${regionOffset}`)]):[null,null];
+    if(token!==generation)return;state.detail=d;state.reads=reads;state.coverage=coverage;state.message='Alignment evidence loaded.';
   }
   root.addEventListener('change',event=>{
     if(!state||busy)return;
+    if(event.target.id==='aj-region-kind'){const kind=event.target.value;action(t=>detail(t,state.detail.id,state.detail.attempts.offset,state.reads.offset,kind));return;}
     if(event.target.id==='aj-type')state.type=event.target.value;
     const id=event.target.dataset.ajInput;
     if(id){if(event.target.checked)state.selected.add(id);else state.selected.delete(id);}
@@ -65,19 +73,20 @@
   });
   root.addEventListener('click',event=>{
     const b=event.target.closest('button');if(!b||b.disabled||busy||!state)return;
-    if(b.hasAttribute('data-aj-close')){state.detail=null;state.reads=null;render();return;}
+    if(b.hasAttribute('data-aj-close')){state.detail=null;state.reads=null;state.coverage=null;render();return;}
     if(b.dataset.ajDetail){action(t=>detail(t,b.dataset.ajDetail));return;}
     if(b.hasAttribute('data-aj-attempts')){action(t=>detail(t,state.detail.id,Number(b.dataset.ajAttempts),state.reads?.offset||0));return;}
     if(b.hasAttribute('data-aj-reads')){action(t=>detail(t,state.detail.id,state.detail.attempts.offset,Number(b.dataset.ajReads)));return;}
+    if(b.hasAttribute('data-aj-regions')){action(t=>detail(t,state.detail.id,state.detail.attempts.offset,state.reads.offset,state.coverage.regions.kind,Number(b.dataset.ajRegions)));return;}
     if(b.hasAttribute('data-aj-submit')){
       const ids=[...state.selected].sort(),type=state.type,signature=JSON.stringify([state.id,ids,type]);
       if(!pending.has(signature))pending.set(signature,crypto.randomUUID());
       const url=base(),body=JSON.stringify({input_ids:ids,data_type:type,idempotency_key:pending.get(signature)});
-      action(async token=>{await request(`${url}/alignments`,{method:'POST',headers:{'Content-Type':'application/json'},body});pending.delete(signature);if(token!==generation)return;state.selected.clear();state.detail=null;state.reads=null;await load(token,0,0);if(token===generation)state.message='Alignment queued. Awaiting a local worker.';});return;
+      action(async token=>{await request(`${url}/alignments`,{method:'POST',headers:{'Content-Type':'application/json'},body});pending.delete(signature);if(token!==generation)return;state.selected.clear();state.detail=null;state.reads=null;state.coverage=null;await load(token,0,0);if(token===generation)state.message='Alignment queued. Awaiting a local worker.';});return;
     }
     if(b.dataset.ajCancel){
       const url=`${base()}/alignments/${encodeURIComponent(b.dataset.ajCancel)}/cancel`;
-      action(async token=>{await request(url,{method:'POST'});if(token!==generation)return;state.detail=null;state.reads=null;await load(token);if(token===generation)state.message='Alignment cancelled. Late results cannot be published.';});return;
+      action(async token=>{await request(url,{method:'POST'});if(token!==generation)return;state.detail=null;state.reads=null;state.coverage=null;await load(token);if(token===generation)state.message='Alignment cancelled. Late results cannot be published.';});return;
     }
     const inputOffset=b.hasAttribute('data-aj-inputs')?Number(b.dataset.ajInputs):0;
     const jobOffset=b.hasAttribute('data-aj-jobs')?Number(b.dataset.ajJobs):0;
@@ -85,6 +94,6 @@
     action(async token=>{await load(token,inputOffset,jobOffset);if(token!==generation)return;if(selectedDetail)await detail(token,selectedDetail);if(token===generation)state.message='Alignment status refreshed.';});
   });
   function clear(){generation++;state=null;busy=false;root.removeAttribute('aria-busy');render();}
-  function open(id){clear();const empty=()=>({items:[],total:0,offset:0,has_more:false});state={id,type:'',selected:new Set(),inputs:empty(),jobs:empty(),loaded:false,message:'',error:false,detail:null,reads:null};action(async token=>{await load(token);if(token===generation)state.message='Choose files and their sequencing data type.';});}
+  function open(id){clear();const empty=()=>({items:[],total:0,offset:0,has_more:false});state={id,type:'',selected:new Set(),inputs:empty(),jobs:empty(),loaded:false,message:'',error:false,detail:null,reads:null,coverage:null};action(async token=>{await load(token);if(token===generation)state.message='Choose files and their sequencing data type.';});}
   window.alignmentJobs={open,clear};
 })();

@@ -70,6 +70,25 @@ def _published(row):
     return result
 
 
+def _validate_sources(evidence):
+    # Fail closed on broken provenance, rather than displaying another record's evidence.
+    try:
+        all_reads, sources = evidence['reads'], evidence['sources']
+        identities = {i['id'] for i in evidence['input_identities']}
+        ordinals = {i:0 for i in identities}
+        valid = len(all_reads) == len(sources) == len(evidence['query_sha256'])
+        # sources_sha256 hashes the original file bytes, not reserialized DB JSON.
+        for i,(r,s) in enumerate(zip(all_reads,sources)):
+            ordinals[s['input_id']] += 1
+            valid = valid and (r['read_index'] == i and s['query_name'] == f'q{i}'
+                     and s['record_ordinal'] == ordinals[s['input_id']]
+                     and s['sequence_sha256'] == evidence['query_sha256'][i])
+    except (KeyError, TypeError, IndexError, ValueError):
+        valid = False
+    if not valid:
+        raise HTTPException(409, 'alignment_source_mapping_invalid')
+
+
 @router.post('', status_code=201)
 def submit(revision_id: str, request: Submission):
     with closing(connect()) as db:
@@ -128,22 +147,8 @@ def detail(revision_id: str, job_id: str, limit: int=Query(5,ge=1,le=100), offse
 def reads(revision_id: str, job_id: str, limit: int=Query(20,ge=1,le=100), offset: int=Query(0,ge=0)):
     with closing(connect()) as db:
         db.execute('BEGIN');evidence = _published(_job(db,revision_id,job_id))
-    # Fail closed on broken provenance, rather than displaying another record's evidence.
-    try:
-        all_reads, sources = evidence['reads'], evidence['sources']
-        identities = {i['id'] for i in evidence['input_identities']}
-        ordinals = {i:0 for i in identities}
-        valid = len(all_reads) == len(sources) == len(evidence['query_sha256'])
-        # sources_sha256 hashes the original file bytes, not reserialized DB JSON.
-        for i,(r,s) in enumerate(zip(all_reads,sources)):
-            ordinals[s['input_id']] += 1
-            valid = valid and (r['read_index'] == i and s['query_name'] == f'q{i}'
-                     and s['record_ordinal'] == ordinals[s['input_id']]
-                     and s['sequence_sha256'] == evidence['query_sha256'][i])
-    except (KeyError, TypeError, IndexError, ValueError):
-        valid = False
-    if not valid:
-        raise HTTPException(409, 'alignment_source_mapping_invalid')
+    _validate_sources(evidence)
+    all_reads, sources = evidence['reads'], evidence['sources']
     items = [{**{k:r[k] for k in READ_FIELDS},
               'source':{k:sources[i][k] for k in ('query_name','input_id','record_ordinal','sequence_sha256')}}
              for i,r in enumerate(all_reads[offset:offset+limit],offset)]
@@ -163,3 +168,23 @@ def cancellation(revision_id: str, job_id: str):
         raise HTTPException(409,str(exc)) from exc
     with closing(connect()) as db:
         return _summary(_job(db,revision_id,job_id))
+
+
+@router.get('/{job_id}/coverage')
+def coverage(revision_id: str, job_id: str,
+             kind: Literal['unpaired','ambiguous_only','deletion']='unpaired',
+             limit: int=Query(20,ge=1,le=100), offset: int=Query(0,ge=0)):
+    from .alignment_coverage import summarize, regions, CoverageError
+    with closing(connect()) as db:
+        db.execute('BEGIN');evidence = _published(_job(db,revision_id,job_id))
+    _validate_sources(evidence)
+    try:
+        summary = summarize(evidence)
+        intervals = regions(summary,kind)
+    except CoverageError as exc:
+        raise HTTPException(409,str(exc)) from exc
+    summary.pop('segments')
+    return {'job_id':job_id,'attempt_number':evidence['attempt_number'],
+            'reference_sha256':evidence['reference_sha256'],'summary':summary,
+            'regions':{**_page([{'start':a,'end':b,'length_bp':b-a} for a,b in intervals[offset:offset+limit]],
+                              len(intervals),limit,offset),'kind':kind}}
