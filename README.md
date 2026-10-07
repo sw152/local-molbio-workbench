@@ -201,3 +201,25 @@ own bounded exact-match implementation and does not run UCSC software.
 
 Run `python scripts/verify_primer_ui.py` to check target entry, actual Primer3
 execution on synthetic data, selection, CSV export and persisted target metadata.
+
+## Review combined read coverage
+
+The Sanger panel summarizes the latest saved analysis of each read attached to
+one reference revision. It displays the union of aligned reference positions,
+uncovered regions, overlap depth and every included or excluded source run.
+Circular gaps at the two coordinate ends are shown as one region across the
+origin. Reanalysis history never increases read depth.
+
+This is geometric alignment coverage, **not quality-screened coverage or a
+consensus**. Low-quality, ambiguous and differing calls may contribute aligned
+positions; their saved warnings remain visible. Conflicts are not yet evaluated,
+and even 100% coverage does not mean whole-plasmid verification. Ambiguous
+placements, truncated searches, missing/mismatched input hashes, unsupported
+reports and invalid intervals are excluded. Duplicate source hashes exclude all
+copies. Original files are not rechecked when viewing the summary.
+
+`GET /api/sequence-revisions/{id}/sanger-reads?include_summary=true` returns
+`{reads, summary}` from one database snapshot; without that option the original
+array response is preserved. The summary includes source analysis IDs, hashes,
+method version and a deterministic snapshot SHA-256. Changing the historical
+report displayed in a read card does not change this latest-run summary.

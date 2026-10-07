@@ -39,6 +39,7 @@
     busy = false;
     el('sanger-form').reset();
     el('sanger-reads').replaceChildren();
+    window.sangerSummary.clear();
     status('');
     controls();
   }
@@ -122,8 +123,9 @@
     finally{if(card.isConnected){card.historyLoading=false;page.disabled=busy;}}
   });
   async function refresh(token) {
-    const reads = await request(`/api/sequence-revisions/${encodeURIComponent(state.id)}/sanger-reads`);
-    if (token === generation) render(reads);
+    window.sangerSummary.clear();
+    const result = await request(`/api/sequence-revisions/${encodeURIComponent(state.id)}/sanger-reads?include_summary=true`);
+    if (token === generation) { render(result.reads); window.sangerSummary.render(result.summary); }
   }
   async function open(id, length) {
     clear();
