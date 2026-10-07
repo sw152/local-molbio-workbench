@@ -7,6 +7,8 @@ from Bio import __version__ as biopython_version
 from Bio.Align import PairwiseAligner
 from Bio.Seq import Seq
 
+from .sanger_mapping import build_base_mapping
+
 
 class SangerVerificationError(ValueError):
     """Raised when a read cannot produce a meaningful alignment."""
@@ -15,7 +17,7 @@ class SangerVerificationError(ValueError):
 ALIGNMENT_PARAMETERS = {
     "algorithm": "Biopython.PairwiseAligner",
     "algorithm_version": biopython_version,
-    "evidence_version": 3,
+    "evidence_version": 4,
     "mode": "local",
     "match_score": 2,
     "mismatch_score": -2,
@@ -65,7 +67,7 @@ def align_sanger_read(
         raise SangerVerificationError("Alignment supports only A/C/G/T/N base calls")
     if qualities is not None and (
         len(qualities) != len(raw_query)
-        or any(not isinstance(q, int) or q < 0 for q in qualities)
+        or any(type(q) is not int or q < 0 for q in qualities)
     ):
         raise SangerVerificationError("Quality values must be nonnegative integers, one per base")
     original_length = len(raw_query)
@@ -125,6 +127,7 @@ def align_sanger_read(
     oriented_quality = retained_quality[::-1] if retained_quality is not None and orientation == "reverse" else retained_quality
     oriented_offset = original_length - trim_end if orientation == "reverse" else trim_start
     variants = []
+    base_columns = []
     matched = mismatched = inserted = deleted = ambiguous = 0
     positions, query_positions, covered_positions = [], [], set()
     previous_reference = None
@@ -142,6 +145,8 @@ def align_sanger_read(
             low_quality += 1
         if t >= 0 and q >= 0:
             covered_positions.add(position)
+            original_position = trim_end - 1 - q if orientation == "reverse" else trim_start + q
+            base_columns.append((position, original_position, target[t], query[q], quality))
             if "N" in (target[t], query[q]):
                 ambiguous += 1
                 kind = "ambiguous"
@@ -189,6 +194,7 @@ def align_sanger_read(
         else:
             intervals.append([p, p + 1])
     evidence = {
+        "base_mapping": build_base_mapping(base_columns, orientation, ALIGNMENT_PARAMETERS["quality_review_threshold"]),
         "parameters": {**ALIGNMENT_PARAMETERS, "trimming": trimming["method"], "trim_quality_threshold": trim_quality_threshold},
         "trimming": trimming,
         "coordinate_system": "zero-based-half-open; insertion positions are boundaries",

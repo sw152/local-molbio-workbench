@@ -10,7 +10,7 @@ LIMITATIONS = [
     'Differences are per-base and indels are not normalized. Review ambiguity and quality flags.',
     'End trimming, when enabled, retains internal low-quality calls; retained-read coverage is not original-read coverage.',
     'Export reproduces stored evidence. Original files and their hashes were not rechecked at export.',
-    'Raw AB1 signals and full read/reference sequences are not included in this report.',
+    'Raw AB1 signals and original source files are not included. Newer saved evidence includes aligned read/reference bases, which may span the entire input.',
 ]
 
 

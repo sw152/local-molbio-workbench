@@ -113,7 +113,9 @@ to a historical run first to export that run; the export always uses its explici
 analysis ID. HTML is a self-contained, offline-readable report with coverage and
 retained-read diagrams, differences, input provenance, parameters and limitations.
 JSON preserves the complete saved alignment, including its original coordinate
-conventions. Neither format contains raw AB1 signals or full input sequences.
+conventions. Neither format contains raw AB1 signals or original source files. Evidence v4
+includes aligned read/reference bases and per-base qualities; those aligned bases
+may span the entire input.
 
 New analysis jobs snapshot input names, lengths and reference topology alongside
 the hashes. For older jobs, linked-record metadata is labeled as such, and missing
@@ -223,3 +225,25 @@ copies. Original files are not rechecked when viewing the summary.
 array response is preserved. The summary includes source analysis IDs, hashes,
 method version and a deterministic snapshot SHA-256. Changing the historical
 report displayed in a read card does not change this latest-run summary.
+
+## Inspect per-base quality mappings
+
+New Sanger analyses use evidence v4. `evidence.base_mapping` stores compact blocks
+of aligned reference/read base pairs: reference start/end, original uploaded-read
+start and step (+1 or −1), paired reference/call strings, and a Phred array with
+`null` for unavailable quality. Reverse calls are complemented into reference
+orientation, while their coordinates and qualities still refer to the original
+AB1. Blocks split at indels and circular origin crossings. Insertions/deletions
+remain in the saved difference list and are not assigned invented paired bases.
+
+The read panel separates Q20-or-higher unambiguous matching and differing calls.
+Other paired calls are classified as ambiguous first, then quality unavailable,
+then below Q20. Q20 itself is included. These are counts for the reported local
+placement; ambiguity/truncated-search flags still apply. This filter is distinct
+from optional end trimming and does not remove calls from saved evidence.
+
+Historical v2/v3 reports remain unchanged and show that the mapping was not
+recorded. JSON and standalone HTML's saved-evidence section retain the new
+mapping, including aligned bases, which can encompass the entire input. The
+combined-read panel remains geometric coverage; quality-aware multi-read
+conflict review is the next step, not a completed validation or consensus feature.

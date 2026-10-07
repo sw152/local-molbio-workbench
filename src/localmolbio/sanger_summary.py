@@ -24,7 +24,7 @@ def summarize_sanger_reads(reference: dict, records: list[dict]) -> dict:
         if not record.get('alignment_id'):
             reasons.append('not_analyzed')
         else:
-            if evidence.get('scope') != 'local_read_alignment' or params.get('evidence_version') not in {2,3}:
+            if evidence.get('scope') != 'local_read_alignment' or params.get('evidence_version') not in {2,3,4}:
                 reasons.append('unsupported_or_missing_evidence')
             if evidence.get('direction') not in {'forward','reverse'}:
                 reasons.append('unresolved_direction')

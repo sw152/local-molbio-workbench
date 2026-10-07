@@ -48,6 +48,9 @@ trim_calls[180]=next(b for b in 'ACGT' if b!=trim_calls[180])
 trim_quality=[5]*20+[38]*550+[8]*30;trim_quality[180]=12
 trim_path=artifacts/'synthetic-reverse-trim.ab1'
 trim_path.write_bytes(synthetic_ab1(str(Seq(''.join(trim_calls)).reverse_complement()),trim_quality[::-1],trace=True))
+high_calls=list(reference[100:500]);high_calls[90]=next(b for b in 'ACGT' if b!=high_calls[90])
+high_path=artifacts/'synthetic-Q40-difference.ab1'
+high_path.write_bytes(synthetic_ab1(''.join(high_calls),[40]*400,trace=True))
 invalid = artifacts / "invalid.ab1"
 invalid.write_bytes(b"invalid data")
 with socket.socket() as s:
@@ -211,6 +214,12 @@ try:
         expect(trim_card.locator('.trim-evidence')).to_contain_text('excluded 30 left / 20 right')
         expect(trim_card.locator('.read-metrics')).to_contain_text('91.7%')
         expect(trim_card.locator('.read-flags')).to_contain_text('below Q20')
+        expect(trim_card.locator('.base-mapping-counts')).to_contain_text('549')
+        expect(trim_card.locator('.base-mapping-counts')).to_contain_text('0Differing calls')
+        trim_card.locator('.base-mapping summary').click()
+        expect(trim_card.locator('.base-mapping')).to_contain_text('580 → 31')
+        expect(trim_card.locator('.base-mapping')).to_contain_text('1 low-quality')
+        trim_card.locator('.base-mapping').screenshot(path=str(artifacts/'base-mapping-desktop.png'))
         trim_card.locator('.variant-details summary').click()
         expect(trim_card.locator('.variant-scroll tbody')).to_contain_text('481')
         expect(trim_card.locator('.variant-scroll tbody')).to_contain_text('420')
@@ -238,6 +247,12 @@ try:
         page.screenshot(path=str(artifacts/'trim-trace-mobile.png'))
         assert trim_card.locator('.trace-selected').evaluate('(el)=>{const r=el.getBoundingClientRect();const s=el.closest(".trace-scroll").getBoundingClientRect();return r.left>=s.left&&r.right<=s.right;}')
         assert page.locator('#map-panel').evaluate('(el)=>el.scrollWidth<=el.clientWidth+1')
+        trim_card.locator('.base-mapping summary').click()
+        trim_card.locator('.base-mapping').evaluate('(el)=>el.scrollIntoView({block:"start"})')
+        page.screenshot(path=str(artifacts/'base-mapping-mobile.png'))
+        trim_card.locator('.mapping-scroll').evaluate('(el)=>{el.scrollLeft=el.scrollWidth;}')
+        assert trim_card.locator('.mapping-scroll td').last.evaluate('(el)=>{const r=el.getBoundingClientRect();const s=el.closest(".mapping-scroll").getBoundingClientRect();return r.left>=s.left&&r.right<=s.right+1;}')
+        page.screenshot(path=str(artifacts/'base-mapping-mobile-direction.png'))
         # Latest-only union: six forward runs plus two reverse runs are two reads.
         summary=page.locator('#sanger-summary')
         expect(summary).to_contain_text('720 / 1,400 bp aligned')
@@ -332,6 +347,30 @@ try:
             card.get_by_role('button',name='Go',exact=True).click()
             expect(card.locator('.trace-view')).to_contain_text('Bases 101–124')
             card.locator('.trace-view').screenshot(path=str(artifacts/'public-trace-desktop.png'))
+        # High quality does not mean reference matching: exercise amber evidence with a real AB1.
+        page.set_viewport_size({'width':1440,'height':1080})
+        page.locator('#sanger-file').set_input_files(str(high_path))
+        page.get_by_role('button',name='Attach AB1',exact=True).click()
+        high_card=page.locator('.read-card').filter(has_text=high_path.name)
+        high_card.get_by_role('button',name='Analyze against this revision').click()
+        expect(high_card.locator('.base-mapping-counts')).to_contain_text('399Matching calls')
+        expect(high_card.locator('.base-mapping-counts')).to_contain_text('1Differing calls')
+        expect(high_card.locator('.base-mapping svg')).to_have_attribute('aria-label','400 reference positions with unambiguous calls at Q20 or above, including 1 difference')
+        high_card.locator('.base-mapping').screenshot(path=str(artifacts/'base-mapping-difference.png'))
+        # Simulate a v3 historical response: the UI must not invent missing base-level evidence.
+        def legacy_history(route):
+            response=route.fetch();data=response.json()
+            for item in data['items']:
+                item['evidence'].pop('base_mapping',None)
+                item['evidence']['parameters']['evidence_version']=3
+            route.fulfill(response=response,json=data)
+        page.route('**/api/sanger-reads/*/analyses?limit=*',legacy_history,times=1)
+        high_card.get_by_role('button',name='Browse saved analyses').click()
+        high_card.locator('.history-runs button').click()
+        expect(high_card.locator('.mapping-unavailable')).to_contain_text('was not recorded')
+        expect(high_card.locator('.base-mapping')).to_have_count(0)
+        high_card.get_by_role('button',name='Show latest report').click()
+        expect(high_card.locator('.base-mapping')).to_have_count(1)
         # A failed list request must be shown, not reported as an empty library.
         page.locator('#close-map').click()
         page.route('**/api/sequence-revisions/*/sanger-reads*', lambda route: route.abort())
@@ -340,7 +379,7 @@ try:
         expect(page.locator('#sanger-summary')).to_be_empty()
         assert not errors, errors
         browser.close()
-    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['latest-only multi-read coverage, overlap and circular gap review','binary ABIF upload','invalid and duplicate upload','analysis and persisted evidence','append-only rerun and historical report switching','six-run history pagination','optional end trimming with original and retained coverage','historical and current JSON/HTML downloads','offline HTML rendering without external requests','export failure recovery and late-response cancellation','reverse trimmed variant and boundary jump to original peaks','history network failure and stale rerun recovery','Q12 variant and focused chromatogram','desktop and mobile layouts','network failure','no JS exceptions']},indent=2))
+    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['base-level Q20 mapping, reverse original coordinates and historical absence','high-quality difference shown separately from matching evidence','latest-only multi-read coverage, overlap and circular gap review','binary ABIF upload','invalid and duplicate upload','analysis and persisted evidence','append-only rerun and historical report switching','six-run history pagination','optional end trimming with original and retained coverage','historical and current JSON/HTML downloads','offline HTML rendering without external requests','export failure recovery and late-response cancellation','reverse trimmed variant and boundary jump to original peaks','history network failure and stale rerun recovery','Q12 variant and focused chromatogram','desktop and mobile layouts','network failure','no JS exceptions']},indent=2))
 finally:
     server.terminate()
     server.wait(timeout=10)
