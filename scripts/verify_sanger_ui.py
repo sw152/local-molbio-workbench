@@ -1,0 +1,122 @@
+"""Optional end-to-end browser check using synthetic GenBank and binary ABIF.
+
+Run with the ui extra installed, e.g. python scripts/verify_sanger_ui.py.
+Artifacts and its isolated database stay under var/ui-check (never committed).
+Uses an installed Chrome or Playwright Chromium; no private browser profile.
+"""
+from pathlib import Path
+import io
+import json
+import os
+import random
+import socket
+import subprocess
+import sys
+import time
+import zipfile
+
+import httpx
+from Bio import SeqIO
+from Bio.Seq import Seq
+from Bio.SeqRecord import SeqRecord
+from Bio.SeqFeature import SeqFeature, FeatureLocation
+from playwright.sync_api import sync_playwright, expect
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tests"))
+from abif_fixture import synthetic_ab1
+
+artifacts = ROOT / "var" / "ui-check" / time.strftime("%Y%m%d-%H%M%S")
+artifacts.mkdir(parents=True)
+rng = random.Random(43)
+reference = "".join(rng.choice("ACGT") for _ in range(1400))
+record = SeqRecord(Seq(reference), id="synthetic", name="pEvidence-demo", description="Synthetic UI verification construct", annotations={"molecule_type":"DNA", "topology":"circular"})
+record.features = [SeqFeature(FeatureLocation(start, end, strand=1 if i % 2 else -1), type=kind, qualifiers={"label":[label]}) for i, (start, end, kind, label) in enumerate([(60,340,"CDS","Reporter"),(380,520,"promoter","Promoter"),(650,880,"rep_origin","Origin"),(940,1250,"CDS","Marker")])]
+handle = io.StringIO()
+SeqIO.write(record, handle, "genbank")
+archive = artifacts / "synthetic.zip"
+with zipfile.ZipFile(archive, "w") as z:
+    z.writestr("synthetic.gb", handle.getvalue())
+read = list(reference[150:750])
+read[200] = next(base for base in "ACGT" if base != read[200])
+quality = [38] * len(read)
+quality[200] = 12
+read_path = artifacts / "synthetic-Q12.ab1"
+read_path.write_bytes(synthetic_ab1("".join(read), quality))
+invalid = artifacts / "invalid.ab1"
+invalid.write_bytes(b"invalid data")
+with socket.socket() as s:
+    s.bind(("127.0.0.1",0))
+    port = s.getsockname()[1]
+base = f"http://127.0.0.1:{port}"
+environment = dict(os.environ, MOLBIO_DATA_DIR=str(artifacts / "runtime"))
+log = (artifacts / "server.log").open("w")
+server = subprocess.Popen([sys.executable,"-m","uvicorn","localmolbio.api:app","--host","127.0.0.1","--port",str(port)], cwd=ROOT, env=environment, stdout=log, stderr=log)
+try:
+    for _ in range(100):
+        try:
+            if httpx.get(base + "/health").status_code == 200:
+                break
+        except httpx.TransportError:
+            pass
+        time.sleep(.1)
+    else:
+        raise RuntimeError("Test server did not start")
+    with sync_playwright() as p:
+        chrome = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        browser = p.chromium.launch(headless=True, **({"executable_path":str(chrome)} if chrome.exists() else {}))
+        page = browser.new_page(viewport={"width":1440,"height":1080}, device_scale_factor=1)
+        errors=[]
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.goto(base)
+        page.locator('#archive').set_input_files(str(archive))
+        page.get_by_role('button',name='Import into local library').click()
+        expect(page.locator('#status')).to_contain_text('Imported 1 records')
+        page.get_by_role('button',name='Open map').click()
+        expect(page.locator('#sanger-reads')).to_contain_text('No reads attached')
+        page.locator('#sanger-file').set_input_files(str(invalid))
+        page.get_by_role('button',name='Attach AB1',exact=True).click()
+        expect(page.locator('#sanger-status')).to_contain_text('Could not attach read')
+        assert page.locator('#sanger-upload-button').is_enabled()
+        page.locator('#sanger-file').set_input_files(str(read_path))
+        page.get_by_role('button',name='Attach AB1',exact=True).click()
+        expect(page.locator('#sanger-reads')).to_contain_text('Ready to analyze')
+        page.get_by_role('button',name='Analyze against this revision').click()
+        expect(page.locator('#sanger-status')).to_contain_text('Analysis saved')
+        expect(page.locator('#sanger-reads')).to_contain_text('99.8%')
+        expect(page.locator('#sanger-reads')).to_contain_text('42.9%')
+        expect(page.locator('#sanger-reads')).to_contain_text('below Q20')
+        page.locator('.variant-details summary').click()
+        expect(page.locator('.variant-scroll tbody tr')).to_have_count(1)
+        expect(page.locator('.variant-scroll tbody')).to_contain_text('351')
+        expect(page.locator('.variant-scroll tbody')).to_contain_text('12')
+        page.locator('#sanger-panel').screenshot(path=str(artifacts/'sanger-desktop.png'))
+        page.locator('#map-panel').evaluate('(el) => el.scrollTop = 0')
+        page.screenshot(path=str(artifacts/'construct-desktop.png'))
+        # Persistence through reload and duplicate-upload feedback.
+        page.reload()
+        page.get_by_role('button',name='Open map').click()
+        expect(page.locator('#sanger-reads')).to_contain_text('99.8%')
+        page.locator('#sanger-file').set_input_files(str(read_path))
+        page.get_by_role('button',name='Attach AB1',exact=True).click()
+        expect(page.locator('#sanger-status')).to_contain_text('already attached')
+        page.set_viewport_size({'width':390,'height':844})
+        page.locator('.variant-details summary').click()
+        page.locator('#sanger-panel').evaluate('(el) => el.scrollIntoView({block: "start"})')
+        page.screenshot(path=str(artifacts/'sanger-mobile.png'))
+        page.locator('.variant-details').evaluate('(el) => el.scrollIntoView({block: "center"})')
+        page.screenshot(path=str(artifacts/'sanger-mobile-details.png'))
+        assert page.locator('#sanger-panel').evaluate('(el) => el.scrollWidth <= el.clientWidth + 1')
+        assert page.locator('#map-panel').evaluate('(el) => el.scrollWidth <= el.clientWidth + 1'), page.locator('#map-panel').evaluate('(el) => Array.from(el.querySelectorAll("*")).filter(e => e.getBoundingClientRect().right > innerWidth).map(e => [e.tagName,e.className,e.getBoundingClientRect().width]).slice(0,25)')
+        # A failed list request must be shown, not reported as an empty library.
+        page.locator('#close-map').click()
+        page.route('**/api/sequence-revisions/*/sanger-reads', lambda route: route.abort())
+        page.get_by_role('button',name='Open map').click()
+        expect(page.locator('#sanger-status')).to_contain_text('Could not load reads')
+        assert not errors, errors
+        browser.close()
+    print(json.dumps({'passed':True,'artifacts':str(artifacts),'checks':['binary ABIF upload','invalid and duplicate upload','analysis and persisted evidence','Q12 variant','desktop and mobile layouts','network failure','no JS exceptions']},indent=2))
+finally:
+    server.terminate()
+    server.wait(timeout=10)
+    log.close()

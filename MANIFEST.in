@@ -1,0 +1,3 @@
+recursive-include tests *.py
+recursive-include docs *.md
+include scripts/verify_sanger_ui.py
